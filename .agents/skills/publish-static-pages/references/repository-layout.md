@@ -29,15 +29,7 @@ StaticWebPage/
 
 HTML、CSS、JavaScript、字体和页面显示所需图片属于运行资源。PDF、DOCX、ZIP、日志、数据、示例配置及其他下载附件属于 Ref。不能仅凭扩展名判断；以文件是否参与页面运行作为归属标准。
 
-## slug
 
-slug 必须匹配：
-
-```text
-^[a-z0-9]+(?:-[a-z0-9]+)*$
-```
-
-slug 发布后永久稳定，不因标题变化而修改，也不得复用给其他页面。
 
 ## pages.json
 
