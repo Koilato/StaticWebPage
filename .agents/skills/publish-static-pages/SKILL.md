@@ -4,12 +4,12 @@ description: 在 StaticWebPage 仓库中新增、更新、替换或发布静态 
 ---
 # 全局流程
 
-1.用户提供 HTML 和 Ref 文件 
-2.AI 确定页面 slug 和文件存放位置-
-3.AI生成对应的 GitHub Raw 链接
-4.AI直接修改 HTML的名称为index.html，并在正文最后加入完整 Ref 章节
-5.AI 上传 HTML 文件和ref文件 分别到src/pages/<slug>/index.html 和 references/<slug>/
-6.Vercel 自动构建
+1. 用户提供 HTML 和 Ref 文件 
+2. AI 确定页面 slug 和文件存放位置-
+3. AI生成对应的 GitHub Raw 链接
+4. AI直接修改 HTML的名称为index.html，并在正文最后加入完整 Ref 章节
+5. AI 上传 HTML 文件和ref文件 分别到src/pages/<slug>/index.html 和 references/<slug>/
+6. Vercel 自动构建
 
 # 静态页面发布
 
