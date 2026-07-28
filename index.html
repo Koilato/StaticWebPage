@@ -1,0 +1,938 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>v2rayN TUN 网络修复：完整推理与操作记录</title>
+  <style>
+    :root {
+      --bg: #f3f6f4;
+      --paper: #fffefa;
+      --ink: #17231d;
+      --muted: #627069;
+      --line: #d9e2dc;
+      --green: #196b49;
+      --green-soft: #e6f3ec;
+      --blue: #285f91;
+      --blue-soft: #eaf2fa;
+      --amber: #9a5a12;
+      --amber-soft: #fff3df;
+      --red: #9c3f36;
+      --red-soft: #fbecea;
+      --shadow: 0 16px 50px rgba(29, 54, 41, .10);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% 0%, #e7f1eb 0, transparent 33rem),
+        linear-gradient(180deg, #f8faf8 0, var(--bg) 100%);
+      font: 16px/1.72 -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+
+    .shell {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    header {
+      padding: 68px 0 38px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 18px;
+      color: var(--green);
+      font-size: 13px;
+      font-weight: 750;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 28px;
+      height: 2px;
+      background: currentColor;
+    }
+
+    h1 {
+      max-width: 850px;
+      margin: 0;
+      font-size: clamp(38px, 7vw, 70px);
+      line-height: 1.04;
+      letter-spacing: -.045em;
+    }
+
+    .lede {
+      max-width: 820px;
+      margin: 25px 0 0;
+      color: var(--muted);
+      font-size: clamp(17px, 2vw, 21px);
+    }
+
+    .result-banner {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 24px;
+      align-items: center;
+      margin-top: 36px;
+      padding: 25px 28px;
+      border: 1px solid #bcdac9;
+      border-radius: 18px;
+      background: linear-gradient(135deg, #f1faf5, #e8f5ee);
+      box-shadow: var(--shadow);
+    }
+
+    .result-banner strong {
+      display: block;
+      font-size: 21px;
+    }
+
+    .result-banner p {
+      margin: 4px 0 0;
+      color: #466455;
+    }
+
+    .status {
+      min-width: 116px;
+      padding: 10px 16px;
+      border-radius: 999px;
+      color: #fff;
+      background: var(--green);
+      text-align: center;
+      font-weight: 750;
+    }
+
+    nav {
+      position: sticky;
+      z-index: 10;
+      top: 10px;
+      display: flex;
+      gap: 8px;
+      margin: 0 0 34px;
+      padding: 8px;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255, 254, 250, .88);
+      box-shadow: 0 8px 30px rgba(31, 50, 40, .07);
+      backdrop-filter: blur(12px);
+    }
+
+    nav a {
+      flex: 0 0 auto;
+      padding: 8px 13px;
+      border-radius: 9px;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 650;
+      text-decoration: none;
+    }
+
+    nav a:hover {
+      color: var(--green);
+      background: var(--green-soft);
+    }
+
+    section {
+      margin: 0 0 34px;
+      scroll-margin-top: 80px;
+    }
+
+    .panel {
+      padding: clamp(24px, 4vw, 42px);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--paper);
+      box-shadow: 0 10px 40px rgba(30, 48, 39, .055);
+    }
+
+    h2 {
+      margin: 0 0 10px;
+      font-size: clamp(26px, 4vw, 38px);
+      line-height: 1.18;
+      letter-spacing: -.025em;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 20px;
+      line-height: 1.35;
+    }
+
+    .section-intro {
+      max-width: 780px;
+      margin: 0 0 28px;
+      color: var(--muted);
+    }
+
+    .chain {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-top: 26px;
+    }
+
+    .chain-item {
+      position: relative;
+      min-height: 128px;
+      padding: 20px;
+      border-radius: 14px;
+      background: #f5f7f5;
+    }
+
+    .chain-item:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      z-index: 2;
+      top: 43px;
+      right: -17px;
+      color: var(--green);
+      font-size: 24px;
+      font-weight: 800;
+    }
+
+    .chain-item b {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--green);
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+
+    .matrix {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+      margin-top: 22px;
+    }
+
+    .matrix article {
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: #fff;
+    }
+
+    .matrix p { margin: 5px 0 0; color: var(--muted); }
+
+    .timeline {
+      position: relative;
+      margin-top: 30px;
+    }
+
+    .timeline::before {
+      content: "";
+      position: absolute;
+      top: 10px;
+      bottom: 10px;
+      left: 18px;
+      width: 2px;
+      background: linear-gradient(var(--green), #b7d2c3);
+    }
+
+    .step {
+      position: relative;
+      padding: 0 0 30px 58px;
+    }
+
+    .step:last-child { padding-bottom: 0; }
+
+    .step-no {
+      position: absolute;
+      z-index: 2;
+      top: 1px;
+      left: 0;
+      display: grid;
+      width: 38px;
+      height: 38px;
+      place-items: center;
+      border: 4px solid var(--paper);
+      border-radius: 50%;
+      color: #fff;
+      background: var(--green);
+      font-size: 14px;
+      font-weight: 800;
+      box-shadow: 0 0 0 1px #b9d0c2;
+    }
+
+    .step-card {
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 17px;
+      background: #fff;
+    }
+
+    .step-title {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .tag {
+      flex: 0 0 auto;
+      padding: 4px 9px;
+      border-radius: 999px;
+      color: var(--blue);
+      background: var(--blue-soft);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .reason-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .reason {
+      padding: 15px;
+      border-radius: 12px;
+      background: #f6f8f7;
+    }
+
+    .reason b {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .reason p { margin: 0; }
+
+    .reason.evidence { background: var(--blue-soft); }
+    .reason.decision { background: var(--amber-soft); }
+
+    pre {
+      position: relative;
+      margin: 16px 0 0;
+      padding: 18px 20px;
+      overflow-x: auto;
+      border-radius: 12px;
+      color: #dcece3;
+      background: #18241e;
+      font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    code {
+      padding: .12em .4em;
+      border-radius: 5px;
+      color: #23533d;
+      background: #edf3ef;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: .9em;
+    }
+
+    pre code {
+      padding: 0;
+      color: inherit;
+      background: transparent;
+      font-size: inherit;
+    }
+
+    .signal {
+      margin-top: 15px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--green);
+      border-radius: 0 10px 10px 0;
+      background: var(--green-soft);
+    }
+
+    .signal.warning {
+      border-color: var(--amber);
+      background: var(--amber-soft);
+    }
+
+    .signal strong { display: block; margin-bottom: 3px; }
+
+    table {
+      width: 100%;
+      margin-top: 22px;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th, td {
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .bad { color: var(--red); font-weight: 700; }
+    .good { color: var(--green); font-weight: 700; }
+
+    .principles {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin-top: 24px;
+    }
+
+    .principles article {
+      padding: 20px;
+      border-radius: 15px;
+      color: #eef7f1;
+      background: #1b2d24;
+    }
+
+    .principles span {
+      display: block;
+      margin-bottom: 10px;
+      color: #91caae;
+      font-size: 27px;
+      font-weight: 800;
+    }
+
+    .principles p { margin: 6px 0 0; color: #bad1c4; }
+
+    details {
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+    }
+
+    summary {
+      padding: 14px 16px;
+      cursor: pointer;
+      color: var(--green);
+      font-weight: 700;
+    }
+
+    details > div { padding: 0 16px 16px; }
+
+    footer {
+      padding: 18px 0 52px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    @media (max-width: 800px) {
+      header { padding-top: 44px; }
+      .result-banner { grid-template-columns: 1fr; }
+      .status { justify-self: start; }
+      .chain, .matrix, .principles, .reason-grid { grid-template-columns: 1fr; }
+      .chain-item:not(:last-child)::after {
+        top: auto;
+        right: auto;
+        bottom: -20px;
+        left: 24px;
+        content: "↓";
+      }
+      .step { padding-left: 48px; }
+      .step-card { padding: 19px; }
+      .step-title { display: block; }
+      .tag { display: inline-block; margin-top: 8px; }
+      table { display: block; overflow-x: auto; white-space: nowrap; }
+    }
+
+    @media print {
+      body { background: #fff; }
+      nav { display: none; }
+      .panel, .result-banner { box-shadow: none; break-inside: avoid; }
+      .step-card { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <header class="shell">
+    <div class="eyebrow">Incident review · macOS · v2rayN</div>
+    <h1>我是如何一步步修复 TUN 网络的</h1>
+    <p class="lede">
+      这不是命令清单，而是一份可复用的专家排障记录：每一步都说明为什么查、
+      命令提供什么证据、证据如何推动下一个决策，以及哪些操作被刻意延后。
+    </p>
+    <div class="result-banner">
+      <div>
+        <strong>最终结果：TUN 已真实接管流量，DNS 污染已消除</strong>
+        <p>Google、GitHub、Cloudflare 均实测返回 HTTP 200；不是只看界面开关。</p>
+      </div>
+      <div class="status">已修复</div>
+    </div>
+  </header>
+
+  <main class="shell">
+    <nav aria-label="页面导航">
+      <a href="#model">排障模型</a>
+      <a href="#timeline">完整步骤</a>
+      <a href="#before-after">修复前后</a>
+      <a href="#expert">专家决策</a>
+      <a href="#commands">命令索引</a>
+    </nav>
+
+    <section id="model" class="panel">
+      <h2>先建立最小因果模型</h2>
+      <p class="section-intro">
+        “代理模式能用、TUN 模式不能用”首先说明远端节点大概率可用。两种模式的差异，
+        主要发生在入口、权限、路由与 DNS，而不是代理服务器本身。
+      </p>
+      <div class="chain" aria-label="网络数据路径">
+        <div class="chain-item">
+          <b>应用请求</b>
+          浏览器或命令行发起连接
+        </div>
+        <div class="chain-item">
+          <b>流量入口</b>
+          系统代理端口，或 TUN 虚拟网卡
+        </div>
+        <div class="chain-item">
+          <b>决策层</b>
+          DNS 解析、路由选择、分流规则
+        </div>
+        <div class="chain-item">
+          <b>出口</b>
+          sing-box 节点或本地直连
+        </div>
+      </div>
+      <div class="matrix">
+        <article>
+          <h3>系统代理为什么容易“看起来正常”</h3>
+          <p>应用主动连接 <code>127.0.0.1:10808</code>，sing-box 可以在代理侧解析域名，不依赖全局路由接管。</p>
+        </article>
+        <article>
+          <h3>TUN 为什么更容易暴露问题</h3>
+          <p>它必须同时满足管理员权限、虚拟网卡、路由、DNS 和分流规则都正确，任何一层失效都会表现为“没网”。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="timeline" class="panel">
+      <h2>实际排查与修复步骤</h2>
+      <p class="section-intro">
+        顺序遵循“先证明、后修改；先查共同依赖，再查模式差异；每次只改变一个关键变量”。
+      </p>
+
+      <div class="timeline">
+        <article class="step">
+          <div class="step-no">1</div>
+          <div class="step-card">
+            <div class="step-title">
+              <div>
+                <h3>确认核心进程和系统代理是否真的工作</h3>
+                <p>先验证用户所说的“代理模式可以”，避免把节点故障误判成 TUN 故障。</p>
+              </div>
+              <span class="tag">建立基线</span>
+            </div>
+            <pre><code>ps aux | rg -i 'v2ray|xray|sing-box'
+scutil --proxy
+lsof -nP -iTCP -sTCP:LISTEN | rg '10808|sing-box'
+curl --proxy http://127.0.0.1:10808 https://www.google.com</code></pre>
+            <div class="reason-grid">
+              <div class="reason evidence">
+                <b>得到的证据</b>
+                <p>sing-box 正在监听 10808；系统 HTTP、HTTPS、SOCKS 代理均指向该端口；代理请求返回 HTTP 200。</p>
+              </div>
+              <div class="reason decision">
+                <b>为什么进入下一步</b>
+                <p>节点、协议和代理出口已经被证明可用，因此范围缩小到 TUN 特有的权限、网卡和路由。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="step">
+          <div class="step-no">2</div>
+          <div class="step-card">
+            <div class="step-title">
+              <div>
+                <h3>检查 TUN 网卡和路由有没有真正建立</h3>
+                <p>界面开关不是证据；内核路由表和虚拟网卡才是。</p>
+              </div>
+              <span class="tag">检查数据平面</span>
+            </div>
+            <pre><code>ifconfig -a
+netstat -rn -f inet
+route -n get 1.1.1.1
+route -n get 198.18.0.1</code></pre>
+            <div class="reason-grid">
+              <div class="reason evidence">
+                <b>得到的证据</b>
+                <p>最初没有 v2rayN 的 TUN 网卡；IPv4 默认路由仍走 Wi‑Fi <code>en1 → 10.0.0.1</code>。</p>
+              </div>
+              <div class="reason decision">
+                <b>为什么进入下一步</b>
+                <p>问题不是“路由规则写错了一点”，而是 v2rayN 根本没有生成并启动 TUN 入站，需要检查实际配置。</p>
+              </div>
+            </div>
+            <div class="signal warning">
+              <strong>专家判断</strong>
+              系统中已有多个 <code>utun</code>，不能看到一个虚拟网卡就认定它属于 v2rayN；必须结合地址、配置和进程归属交叉确认。
+            </div>
+          </div>
+        </article>
+
+        <article class="step">
+          <div class="step-no">3</div>
+          <div class="step-card">
+            <div class="step-title">
+              <div>
+                <h3>读取 v2rayN 生成的运行配置，而不是猜设置</h3>
+                <p>运行时配置决定 sing-box 实际做什么。</p>
+              </div>
+              <span class="tag">检查控制平面</span>
+            </div>
+            <pre><code>jq '{inbounds,dns,route,experimental}' \
+  "$HOME/Library/Application Support/v2rayN/binConfigs/config.json"
+
+jq '.TunModeItem' \
+  "$HOME/Library/Application Support/v2rayN/guiConfigs/guiNConfig.json"</code></pre>
+            <div class="reason-grid">
+              <div class="reason evidence">
+                <b>得到的证据</b>
+                <p><code>EnableTun=false</code>，运行配置只有 mixed 代理入口，没有 <code>"type": "tun"</code>。</p>
+              </div>
+              <div class="reason decision">
+                <b>为什么进入下一步</b>
+                <p>TUN 没有进入配置，通常是开关未生效或提权启动失败；下一步应查日志和进程权限。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="step">
+          <div class="step-no">4</div>
+          <div class="step-card">
+            <div class="step-title">
+              <div>
+                <h3>确认提权流程是否失败</h3>
+                <p>macOS 上自动路由 TUN 需要管理员权限，普通用户进程不能完整建立所需网络状态。</p>
+              </div>
+              <span class="tag">定位启动失败</span>
+            </div>
+            <pre><code>ps -axo pid,ppid,user,command | rg 'sing-box|v2rayN'
+tail -500 \
+  "$HOME/Library/Application Support/v2rayN/guiLogs/2026-07-28.txt"
+
+sed -n '1,80p' \
+  "$HOME/Library/Application Support/v2rayN/binConfigs/run_as_sudo.sh"</code></pre>
+            <div class="reason-grid">
+              <div class="reason evidence">
+                <b>得到的证据</b>
+                <p>初始 sing-box 以普通用户运行；日志出现 <code>Failed to find a registration for an Interaction</code>，与 sudo 授权交互失败时间吻合。</p>
+              </div>
+              <div class="reason decision">
+                <b>为什么执行修复</b>
+                <p>证据链已经闭合：开关触发了提权脚本，但授权交互没有完成。获得用户明确授权后，再从界面重新启用 TUN。</p>
+              </div>
+            </div>
+            <div class="signal">
+              <strong>修复动作 A</strong>
+              在 v2rayN 界面重新启用 TUN，让应用重新生成配置并执行自己的 sudo 启动脚本；没有创建永久免密 sudo 规则。
+            </div>
+          </div>
+        </article>
+
+        <article class="step">
+          <div class="step-no">5</div>
+          <div class="step-card">
+            <div class="step-title">
+              <div>
+                <h3>证明 TUN 已经真实启动</h3>
+                <p>修复后必须同时验证进程、配置、网卡和路由，不能只看开关变绿。</p>
+              </div>
+              <span class="tag">四重验证</span>
+            </div>
+            <pre><code>ps -axo pid,user,command | rg 'sing-box run'
+jq '.inbounds' \
+  "$HOME/Library/Application Support/v2rayN/binConfigs/config.json"
+ifconfig utun60
+netstat -rn -f inet</code></pre>
+            <div class="reason-grid">
+              <div class="reason evidence">
+                <b>得到的证据</b>
+                <p>sing-box 已由 <code>root</code> 运行；配置出现 <code>type=tun</code>；<code>utun60</code> 地址为 <code>172.18.0.1</code>；全局分段路由指向该网卡。</p>
+              </div>
+              <div class="reason decision">
+                <b>为什么仍继续检查</b>
+                <p>TUN 数据平面已成立，但使用域名访问 Google 仍超时；说明还存在独立的 DNS 问题，而不是继续反复重启 TUN。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="step">
+          <div class="step-no">6</div>
+          <div class="step-card">
+            <div class="step-title">
+              <div>
+                <h3>把“连接失败”拆成 DNS 与 TCP 两个问题</h3>
+                <p>同一网站，用域名失败、固定正确 IP 成功，是非常强的 DNS 证据。</p>
+              </div>
+              <span class="tag">差分实验</span>
+            </div>
+            <pre><code>scutil --dns
+dscacheutil -q host -a name www.google.com
+dig www.google.com A
+
+curl --resolve www.google.com:443:142.250.72.196 \
+  https://www.google.com</code></pre>
+            <div class="reason-grid">
+              <div class="reason evidence">
+                <b>得到的证据</b>
+                <p>系统通过路由器 DNS <code>10.0.0.1</code> 得到错误的 Google 地址；固定正确 IP 后，TUN 下请求返回 HTTP 200。</p>
+              </div>
+              <div class="reason decision">
+                <b>为什么修改 DNS</b>
+                <p>传输链路已被证明正常，唯一失败变量是名称解析。修改节点、MTU 或分流规则都不是最小修复。</p>
+              </div>
+            </div>
+            <div class="signal">
+              <strong>修复动作 B</strong>
+              将 Wi‑Fi DNS 固定为 <code>8.8.8.8</code> 和 <code>1.1.1.1</code>，并刷新本地 DNS 缓存。
+            </div>
+            <pre><code>networksetup -setdnsservers Wi-Fi 8.8.8.8 1.1.1.1
+dscacheutil -flushcache</code></pre>
+          </div>
+        </article>
+
+        <article class="step">
+          <div class="step-no">7</div>
+          <div class="step-card">
+            <div class="step-title">
+              <div>
+                <h3>端到端验收，而不是“应该好了”</h3>
+                <p>最后验证解析结果、HTTPS、多个站点和 TUN 计数器。</p>
+              </div>
+              <span class="tag">完成验收</span>
+            </div>
+            <pre><code>networksetup -getdnsservers Wi-Fi
+dscacheutil -q host -a name www.google.com
+
+curl -4 https://www.google.com
+curl -4 https://github.com
+curl -4 https://1.1.1.1/cdn-cgi/trace
+
+netstat -ibdn | awk '$1=="utun60" {print}'</code></pre>
+            <div class="reason-grid">
+              <div class="reason evidence">
+                <b>验收结果</b>
+                <p>DNS 返回真实 Google 地址；Google、GitHub、Cloudflare 均返回 HTTP 200；<code>utun60</code> 收发计数持续增长。</p>
+              </div>
+              <div class="reason decision">
+                <b>停止条件</b>
+                <p>入口、路由、解析、传输和真实业务访问均通过，已达到完整修复标准，无需继续扩大改动。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section id="before-after" class="panel">
+      <h2>修复前后对照</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>检查项</th>
+            <th>修复前</th>
+            <th>修复后</th>
+            <th>意义</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>TUN 开关</td>
+            <td class="bad">EnableTun=false</td>
+            <td class="good">EnableTun=true</td>
+            <td>控制面已启用</td>
+          </tr>
+          <tr>
+            <td>sing-box 权限</td>
+            <td class="bad">普通用户</td>
+            <td class="good">root</td>
+            <td>具备建立 TUN 与路由的权限</td>
+          </tr>
+          <tr>
+            <td>TUN 入站</td>
+            <td class="bad">不存在</td>
+            <td class="good">type=tun</td>
+            <td>运行配置真实生效</td>
+          </tr>
+          <tr>
+            <td>虚拟网卡</td>
+            <td class="bad">无 v2rayN TUN</td>
+            <td class="good">utun60 / 172.18.0.1</td>
+            <td>数据平面已建立</td>
+          </tr>
+          <tr>
+            <td>DNS</td>
+            <td class="bad">10.0.0.1，返回错误地址</td>
+            <td class="good">8.8.8.8 + 1.1.1.1</td>
+            <td>消除本地 DNS 污染</td>
+          </tr>
+          <tr>
+            <td>端到端访问</td>
+            <td class="bad">域名 HTTPS 超时</td>
+            <td class="good">多个站点 HTTP 200</td>
+            <td>业务层验收通过</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="expert" class="panel">
+      <h2>作为专家，我是怎么做决策的</h2>
+      <p class="section-intro">
+        专业排障的核心不是记住更多命令，而是让每个命令区分两个以上的竞争假设，并用最小改动验证因果。
+      </p>
+      <div class="principles">
+        <article>
+          <span>01</span>
+          <h3>先缩小故障域</h3>
+          <p>代理模式可用意味着节点与出口可用，所以优先检查 TUN 独有组件，避免无意义地换节点。</p>
+        </article>
+        <article>
+          <span>02</span>
+          <h3>事实优先于界面</h3>
+          <p>开关显示、托盘图标都可能失真；进程 UID、运行配置、路由表和包计数才是事实。</p>
+        </article>
+        <article>
+          <span>03</span>
+          <h3>用差分实验隔离变量</h3>
+          <p>域名失败而固定 IP 成功，直接把故障从“整个 TUN”缩小到“DNS 解析”。</p>
+        </article>
+        <article>
+          <span>04</span>
+          <h3>修最小必要层</h3>
+          <p>DNS 出错就修 DNS，不顺手改 MTU、协议或所有路由；减少副作用和回归面。</p>
+        </article>
+        <article>
+          <span>05</span>
+          <h3>保留未知，不过度断言</h3>
+          <p>系统里另有 ClashMi 扩展，但没有证据证明它是主因，因此没有直接卸载。</p>
+        </article>
+        <article>
+          <span>06</span>
+          <h3>以端到端结果停止</h3>
+          <p>只有真实 HTTPS、多个目标与 TUN 流量计数同时通过，才宣布修复完成。</p>
+        </article>
+      </div>
+
+      <details>
+        <summary>为什么没有直接卸载 ClashMi 网络扩展？</summary>
+        <div>
+          它确实建立了另一套 <code>utun</code> 和补充 DNS，但当时没有证据表明它导致
+          v2rayN 无法提权，也没有证据表明它阻断全部流量。卸载属于影响更大的操作，
+          而启用 TUN 并修正 DNS 后已经通过验收，所以遵循最小改动原则保留它。
+        </div>
+      </details>
+
+      <details>
+        <summary>为什么不设置永久免密 sudo？</summary>
+        <div>
+          永久免密会扩大本机权限暴露面。正确做法是让 v2rayN 使用它自己的提权脚本，
+          只将需要建立 TUN 的 sing-box 进程提升为 root，而不是让整个应用长期拥有管理员权限。
+        </div>
+      </details>
+
+      <details>
+        <summary>为什么默认路由仍显示 Wi‑Fi，不代表 TUN 没生效？</summary>
+        <div>
+          sing-box 在 macOS 上可通过若干更具体的分段路由覆盖公网地址空间，同时保留原始
+          default route 供代理服务器出口使用。路由遵循“最长前缀匹配”，更具体的 TUN
+          路由会优先于默认路由，因此要结合 <code>route get</code> 和 TUN 计数器判断。
+        </div>
+      </details>
+    </section>
+
+    <section id="commands" class="panel">
+      <h2>命令索引与用途</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>目标</th>
+            <th>命令</th>
+            <th>回答的问题</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>进程</td>
+            <td><code>ps -axo pid,user,command</code></td>
+            <td>谁在运行？是否为 root？</td>
+          </tr>
+          <tr>
+            <td>监听端口</td>
+            <td><code>lsof -nP -iTCP -sTCP:LISTEN</code></td>
+            <td>10808 是否真实监听？</td>
+          </tr>
+          <tr>
+            <td>系统代理</td>
+            <td><code>scutil --proxy</code></td>
+            <td>应用是否被导向本地代理？</td>
+          </tr>
+          <tr>
+            <td>网卡</td>
+            <td><code>ifconfig -a</code></td>
+            <td>TUN 是否存在、地址与 MTU 是什么？</td>
+          </tr>
+          <tr>
+            <td>路由</td>
+            <td><code>netstat -rn</code> / <code>route -n get IP</code></td>
+            <td>某个目标最终走哪张网卡？</td>
+          </tr>
+          <tr>
+            <td>运行配置</td>
+            <td><code>jq '.inbounds,.route,.dns' config.json</code></td>
+            <td>sing-box 实际收到的配置是什么？</td>
+          </tr>
+          <tr>
+            <td>DNS</td>
+            <td><code>scutil --dns</code> / <code>dig</code></td>
+            <td>由谁解析、返回了什么地址？</td>
+          </tr>
+          <tr>
+            <td>差分验证</td>
+            <td><code>curl --resolve 域名:443:正确IP</code></td>
+            <td>失败来自 DNS 还是传输链路？</td>
+          </tr>
+          <tr>
+            <td>设置 DNS</td>
+            <td><code>networksetup -setdnsservers Wi-Fi ...</code></td>
+            <td>如何绕开路由器下发的污染 DNS？</td>
+          </tr>
+          <tr>
+            <td>最终验收</td>
+            <td><code>curl</code> + <code>netstat -ibdn</code></td>
+            <td>真实业务访问与 TUN 数据流是否同时正常？</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="signal warning">
+        <strong>回滚 DNS</strong>
+        如需恢复为 DHCP 自动下发 DNS，可执行：
+        <code>networksetup -setdnsservers Wi-Fi empty</code>
+      </div>
+    </section>
+  </main>
+
+  <footer class="shell">
+    本页根据本机实际诊断和修复记录生成；已省略节点凭据与无关的服务器信息。
+  </footer>
+</body>
+</html>
