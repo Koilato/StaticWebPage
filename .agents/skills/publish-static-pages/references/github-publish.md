@@ -57,7 +57,7 @@ npm run publish:page -- \
 npm run publish:page -- <相同页面参数> --push
 ```
 
-命令只接受全新 slug：它负责复制页面与附件、追加页面登记并执行 `npm run publish:check`。`--dry-run` 完成后会恢复 `pages.json`，删除本次创建的页面和附件路径，不提交或推送；发布前检查生成的 `dist/` 会保留为可重新生成的构建产物。
+命令只接受全新 slug：它负责复制页面与附件、追加页面登记并执行 `npm run publish:check`。`--dry-run` 完成后会恢复 `pages.json`，删除本次创建的页面和附件路径，按恢复后的登记重新生成 `dist/`，且不提交或推送。
 
 `--push` 只暂存本次 slug 的页面、附件和 `pages.json`，检查暂存 diff，以固定提交信息 `Publish <slug>` 提交并推送 `origin main`；随后逐字节轮询正式页面和每个 Raw 附件，直到全部与本地文件一致或验证失败。不得以手工复制或手工修改 `pages.json` 代替。
 

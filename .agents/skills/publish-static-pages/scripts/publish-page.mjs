@@ -446,6 +446,7 @@ async function countFiles(directory) {
 }
 
 async function cleanup() {
+  let registryRestored = false;
   if (stagedByScript) {
     run("git", [
       "restore",
@@ -460,9 +461,13 @@ async function cleanup() {
   if (originalRegistry !== undefined) {
     await writeFile(path.join(repoRoot, "pages.json"), originalRegistry, "utf8");
     originalRegistry = undefined;
+    registryRestored = true;
   }
   while (createdPaths.length) {
     await rm(createdPaths.pop(), { recursive: true, force: true });
+  }
+  if (registryRestored) {
+    run("npm", ["run", "build"], true, true);
   }
 }
 
