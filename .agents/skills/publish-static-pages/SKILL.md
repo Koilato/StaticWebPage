@@ -17,6 +17,7 @@ description: 在 StaticWebPage 仓库中新增、更新、替换或发布静态 
 
 后续命令一律在 `git rev-parse --show-toplevel` 返回的仓库根目录执行；该目录必须同时包含 `pages.json`、`package.json` 和 `vercel.json`。
 
+
 ## 输入
 
 开始前确定：
@@ -28,6 +29,14 @@ description: 在 StaticWebPage 仓库中新增、更新、替换或发布静态 
 - slug；默认使用由HTML文件名称生成，如果为中文默认转为英文。
 
 slug 必须稳定、可读且能唯一对应页面。纯中文标题无法稳定生成英文 slug，或生成结果存在多种合理选择时，必须询问用户，不得自行使用随意拼音、翻译、序号或哈希。
+
+slug 必须匹配：
+
+```text
+^[a-z0-9]+(?:-[a-z0-9]+)*$
+```
+
+slug 发布后永久稳定，不因标题变化而修改，也不得复用给其他页面。
 
 ## 文件路由
 
