@@ -1,61 +1,63 @@
 ---
 name: publish-static-pages
-description: 将用户提供的静态 HTML 和 Ref 附件加入 StaticWebPage 单仓库站点，修改源 HTML、生成 GitHub Raw 链接、更新页面目录、校验并推送 main 以触发 Vercel 自动构建。用户要求新增、替换、更新、上传或发布静态页面及其参考文件时使用。
+description: 在 StaticWebPage 仓库中新增、更新、替换或发布静态 HTML 页面及其 Ref 附件；包括维护页面界面、仓库登记、GitHub 发布和 Vercel 正式环境验证。用户要求处理该仓库的静态页面或附件时使用。
 ---
 
-# 静态网页发布
+# 静态页面发布
 
-在 `StaticWebPage` 仓库中完成静态页面从接收到上线的全流程。全程使用中文。
+本文件是仓库静态页面工作的唯一入口。全程使用中文；只按当前任务读取下表所列的直接引用，不沿用其他发布说明。
 
-## 必须读取
+后续命令一律在 `git rev-parse --show-toplevel` 返回的仓库根目录执行；该目录必须同时包含 `pages.json`、`package.json` 和 `vercel.json`。
 
-1. 开始操作前完整读取 [基本规则](references/basic.md)。
-2. 执行上传和发布时完整读取 [使用说明](references/usage.md)。
-3. 创建目录、修改 `pages.json` 或编写 Ref 时完整读取
-   [Schema](references/schema.md)。
+## 输入
 
-## 必要输入
+开始前确定：
 
-从用户输入或文件内容中确定：
+- 操作类型：新增页面，或更新已有页面；
+- HTML 文件或含 `index.html` 的页面目录；
+- Ref 文件或目录；可以为空；
+- 标题、简介、标签；
+- slug；用户未指定时可由非纯中文标题生成。
 
-- HTML 文件或包含 `index.html` 的页面目录。
-- Ref 文件；允许为空。
-- 页面标题、简介和标签。
-- 页面 slug；用户未指定时，根据标题生成。
+slug 必须稳定、可读且能唯一对应页面。纯中文标题无法稳定生成英文 slug，或生成结果存在多种合理选择时，必须询问用户，不得自行使用随意拼音、翻译、序号或哈希。
 
-只有在标题、文件归属或 slug 存在无法安全消除的冲突时才询问用户。
+## 文件路由
 
-## 固定流程
+| 文件 | 何时读取 | 是否必需 | 输入 | 输出 |
+| --- | --- | --- | --- | --- |
+| [编辑静态界面](references/edit-static-ui.md) | 新增 HTML，或改变已有页面的正文、样式、脚本、资源引用、Ref 区块 | 涉及 HTML 时必需 | 原 HTML、运行资源、Ref 清单 | 可直接入库的最终 HTML 与资源 |
+| [仓库布局](references/repository-layout.md) | 判断文件归属、确定 slug、创建目录、编辑 `pages.json` 或生成 Ref 结构 | 新增必需；更新附件、目录或登记信息时必需 | 最终 HTML、页面元数据、附件清单 | 合法目录、登记项和 Ref 标记 |
+| [GitHub 发布](references/github-publish.md) | 需要用 `publish:page` 新增，或需要提交、推送、生成 Raw 链接 | 发布到 GitHub 时必需 | 已校验的页面改动或新增命令输入 | `main` 上的提交与可访问 Raw 地址 |
+| [Vercel 部署](references/vercel-deployment.md) | 已推送 `main`，需要等待并验证正式环境 | 对外发布时必需 | slug、本次提交、预期页面内容和 Raw 地址 | 正式页面与附件的验证结果 |
 
-1. 确认仓库根目录包含 `pages.json`、`package.json` 和 `vercel.json`。
-2. 检查 HTML 的本地资源、敏感信息和现有 Ref。
-3. 确定唯一且永久不变的 slug。
-4. 将 Ref 文件放入 `references/<slug>/`。
-5. 为每个 Ref 文件生成对应的 GitHub Raw 地址。
-6. 直接修改源 HTML，在正文最后写入完整的 `<section id="ref">`。
-7. 将修改后的页面保存到 `src/pages/<slug>/index.html`，运行所需资源放在
-   同目录或其 `assets/` 下。
-8. 只在 `pages.json` 更新页面目录信息；不得保存 Ref 元数据。
-9. 运行 `npm run publish:check`。
-10. 检查 Git diff，确认 `dist/` 和凭据没有进入提交。
-11. 提交相关文件并运行 `git push origin main`。
-12. 等待 Vercel 自动构建，验证目录首页、页面 URL 和全部 Ref 链接。
+## 脚本路由
 
-## 禁止事项
+| 脚本 | 如何使用 | 作用 |
+| --- | --- | --- |
+| `scripts/publish-page.mjs` | 新增页面时只通过 `npm run publish:page -- ...` 调用 | 复制页面和附件、登记、校验、提交、推送并验证线上结果 |
+| `scripts/preflight.mjs` | 只通过 `npm run publish:check` 调用 | 检查仓库身份、配置、测试、页面规则与构建结果；不提交、不推送 |
+| 根目录 `scripts/site-utils.mjs` | 不直接运行 | 为校验和构建提供页面、资源与 Ref 规则 |
+| 根目录 `scripts/site-utils.test.mjs` | 只通过 `npm test` 调用 | 验证 Ref 附件与 HTML 链接一一对应等负面场景 |
+| 根目录 `scripts/validate.mjs` | 通常由 `publish:check` 间接调用 | 校验 `pages.json`、源页面、资源和 Ref |
+| 根目录 `scripts/build.mjs` | 通常由 `publish:check` 或 Vercel 间接调用 | 重新生成 `dist/`、目录首页和 sitemap |
 
-- 不得由 `pages.json` 或构建脚本生成、注入或修改 Ref。
-- 不得把 Ref 文件放入 `src/pages/` 或 `dist/`。
-- 不得让 Ref 链接指向 Vercel 的 `/references/...`。
-- 不得提交 `dist/`、令牌、Cookie、私钥或 `.env`。
-- 不得在未完成线上验证时报告发布成功。
+## 执行流程
 
-## 完成标准
+1. 确认输入、操作类型和稳定 slug；遇到归属或 slug 冲突时停止并询问。
+2. 按上表读取需要的文件，完成最终 HTML、资源和 Ref 设计。
+3. **新增页面**只能依照 [GitHub 发布](references/github-publish.md) 使用 `publish-page` 流程（`npm run publish:page`），不得手工复制新页面或手工追加 `pages.json`。
+4. **更新已有页面**不得运行 `publish:page`；直接修改该 slug 的现有源文件、附件和必要的 `pages.json` 字段，再运行 `npm run publish:check`，检查目标 diff 后按 GitHub 文档提交和推送。
+5. 推送 `main` 后，按 Vercel 文档验证正式目录页、页面和全部 Raw 附件。
 
-仅在以下条件全部满足后报告完成：
+## 停止条件
 
-- `npm run publish:check` 成功。
-- 本地 `main` 与远端 `origin/main` 指向同一提交。
-- Vercel 正式页面已经包含源 HTML 中的 Ref。
-- Ref 链接从 `raw.githubusercontent.com` 返回对应文件。
+出现以下任一情况，不得继续发布或声称成功：
 
-最终报告页面 URL、GitHub 仓库 URL、提交短 SHA 和 Ref 文件数量。
+- slug、页面归属或待替换内容无法唯一判断；
+- 文件含凭据、令牌、Cookie、私钥、节点凭据或 `.env`；
+- 无法把本次改动与工作区中的无关改动安全隔离；
+- 校验、提交、推送或线上验证失败。
+
+## 完成报告
+
+仅在线上验证全部通过后，报告正式页面 URL、GitHub 仓库 URL、提交短 SHA 和 Ref 文件数量。若任务只要求本地修改，应明确说明尚未推送和部署。

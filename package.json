@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "add-page": "node scripts/add-page.mjs",
     "build": "node scripts/build.mjs",
     "validate": "node scripts/validate.mjs",
-    "check": "npm run validate && npm run build",
-    "publish:check": "node .agents/skills/publish-static-pages/scripts/preflight.mjs"
+    "test": "node --test scripts/site-utils.test.mjs",
+    "check": "npm run test && npm run validate && npm run build",
+    "publish:check": "node .agents/skills/publish-static-pages/scripts/preflight.mjs",
+    "publish:page": "node .agents/skills/publish-static-pages/scripts/publish-page.mjs"
   },
   "engines": {
     "node": ">=20"

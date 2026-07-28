@@ -17,49 +17,15 @@ dist/                自动生成的部署目录，不提交
 
 ## 添加页面
 
-添加单个自包含 HTML：
+新增页面必须先由 AI 把最终 Ref 写入 HTML，再使用唯一发布入口：
 
 ```bash
-npm run add-page -- \
-  --source /path/to/page.html \
-  --slug example-page \
-  --title "示例页面" \
-  --description "页面简介" \
-  --tags "示例,文档"
+npm run publish:page -- <页面参数> --dry-run
+npm run publish:page -- <相同页面参数> --push
 ```
 
-如果页面带有图片、CSS 或 JavaScript，请将 `--source` 指向包含
-`index.html` 和相关资源的完整目录。
-
-## Ref 与附件
-
-每个源 HTML 都必须在正文末尾直接包含完整的 Ref 章节。附件放在
-`references/<slug>/`，AI 根据文件路径生成 GitHub Raw 链接并写入 HTML：
-
-```html
-<section id="ref">
-  <h2>Ref</h2>
-  <ul>
-    <li>
-      <a href="https://raw.githubusercontent.com/Koilato/StaticWebPage/main/references/network-tun-repair/commands.txt">
-        排障命令清单
-      </a>
-      <p>正文中使用的命令和说明。</p>
-    </li>
-  </ul>
-</section>
-```
-
-生成的链接指向：
-
-```text
-https://raw.githubusercontent.com/Koilato/StaticWebPage/main/references/<slug>/<文件名>
-```
-
-Ref 是源 HTML 的一部分，不由 `pages.json` 或构建脚本生成。附件不进入
-`dist/`，因此访问和下载由 GitHub 提供，不经过 Vercel。
-网页显示所必需的图片、CSS 和 JavaScript 不属于 Ref 附件，仍与页面
-一起放在 `src/pages/<slug>/`。
+参数、目录、Ref、GitHub 和 Vercel 的唯一操作入口见
+`.agents/skills/publish-static-pages/SKILL.md`。
 
 ## 校验与构建
 

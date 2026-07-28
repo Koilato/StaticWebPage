@@ -21,8 +21,18 @@ requireEqual(
 );
 requireEqual(
   packageJson.scripts?.check,
-  "npm run validate && npm run build",
+  "npm run test && npm run validate && npm run build",
   "check 脚本",
+);
+requireEqual(
+  packageJson.scripts?.test,
+  "node --test scripts/site-utils.test.mjs",
+  "test 脚本",
+);
+requireEqual(
+  packageJson.scripts?.["publish:page"],
+  "node .agents/skills/publish-static-pages/scripts/publish-page.mjs",
+  "publish:page 脚本",
 );
 requireEqual(vercelJson.buildCommand, "npm run build", "Vercel buildCommand");
 requireEqual(vercelJson.outputDirectory, "dist", "Vercel outputDirectory");
