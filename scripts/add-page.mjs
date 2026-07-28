@@ -42,7 +42,6 @@ try {
       .split(",")
       .map((tag) => tag.trim())
       .filter(Boolean),
-    references: [],
   };
   const registryPath = path.join(rootDir, "pages.json");
   const originalRegistry = await readFile(registryPath, "utf8");

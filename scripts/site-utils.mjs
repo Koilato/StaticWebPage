@@ -43,10 +43,6 @@ export async function loadAndValidatePages(rootDir) {
     ) {
       throw new Error(`${label} 的 tags 必须是字符串数组。`);
     }
-    if (!Array.isArray(page.references)) {
-      throw new Error(`${label} 的 references 必须是数组。`);
-    }
-
     const expectedFile = path.posix.join(
       "src/pages",
       page.slug,
@@ -60,7 +56,7 @@ export async function loadAndValidatePages(rootDir) {
 
     await access(path.join(rootDir, page.file));
     await validateLocalReferences(rootDir, page);
-    await validateDownloadReferences(rootDir, page, label);
+    await validateHtmlRefSection(rootDir, page);
   }
 
   return pages;
@@ -96,46 +92,42 @@ async function validateLocalReferences(rootDir, page) {
   }
 }
 
-async function validateDownloadReferences(rootDir, page, label) {
-  const files = new Set();
-  const expectedPrefix = `references/${page.slug}/`;
+async function validateHtmlRefSection(rootDir, page) {
+  const html = await readFile(path.join(rootDir, page.file), "utf8");
+  const sectionMatch = html.match(
+    /<section\b[^>]*\bid=["']ref["'][^>]*>([\s\S]*?)<\/section>/i,
+  );
 
-  for (const [index, reference] of page.references.entries()) {
-    const referenceLabel = `${label} 的第 ${index + 1} 个 reference`;
+  if (!sectionMatch) {
+    throw new Error(`${page.slug} 的源 HTML 缺少 <section id="ref">。`);
+  }
 
-    if (
-      !reference ||
-      typeof reference !== "object" ||
-      Array.isArray(reference)
-    ) {
-      throw new Error(`${referenceLabel} 必须是对象。`);
-    }
-    for (const field of ["title", "description", "file"]) {
-      if (
-        typeof reference[field] !== "string" ||
-        !reference[field].trim()
-      ) {
-        throw new Error(`${referenceLabel} 缺少有效的 ${field}。`);
-      }
+  const githubRawBase =
+    "https://raw.githubusercontent.com/Koilato/StaticWebPage/main/";
+  const links = [
+    ...sectionMatch[1].matchAll(/\bhref\s*=\s*["']([^"']+)["']/gi),
+  ].map((match) => match[1].trim());
+
+  for (const link of links) {
+    if (!link.startsWith(githubRawBase)) {
+      throw new Error(`${page.slug} 的 Ref 链接没有使用 GitHub Raw：${link}`);
     }
 
-    const normalizedFile = path.posix.normalize(reference.file);
+    const encodedFile = link.slice(githubRawBase.length).split(/[?#]/, 1)[0];
+    const file = decodeURIComponent(encodedFile);
+    const expectedPrefix = `references/${page.slug}/`;
     if (
-      normalizedFile !== reference.file ||
-      !reference.file.startsWith(expectedPrefix)
+      path.posix.normalize(file) !== file ||
+      !file.startsWith(expectedPrefix)
     ) {
       throw new Error(
-        `${referenceLabel} 的 file 必须位于 ${expectedPrefix} 下。`,
+        `${page.slug} 的 Ref 文件必须位于 ${expectedPrefix}：${file}`,
       );
     }
-    if (files.has(reference.file)) {
-      throw new Error(`${referenceLabel} 重复使用文件：${reference.file}`);
-    }
-    files.add(reference.file);
 
-    const fileStat = await stat(path.join(rootDir, reference.file));
+    const fileStat = await stat(path.join(rootDir, file));
     if (!fileStat.isFile()) {
-      throw new Error(`${referenceLabel} 不是文件：${reference.file}`);
+      throw new Error(`${page.slug} 的 Ref 链接不是文件：${file}`);
     }
   }
 }

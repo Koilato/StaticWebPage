@@ -9,19 +9,11 @@ references/
     └── example.zip
 ```
 
-随后在 `pages.json` 对应页面的 `references` 数组中登记：
+AI 上传文件后，生成对应的 `raw.githubusercontent.com` 地址，并直接
+修改 `src/pages/<slug>/index.html`，在正文最后写入完整的
+`<section id="ref">`。Ref 不由 `pages.json` 或构建脚本生成。
 
-```json
-{
-  "title": "文件名称",
-  "description": "说明该文件的内容和用途",
-  "file": "references/<slug>/document.pdf"
-}
-```
-
-构建脚本会在网页末尾生成 Ref 章节，并把 `file` 转换为
-`raw.githubusercontent.com` 直链。`references/` 不会复制到 `dist/`，
-因此附件流量由 GitHub 承担。
+`references/` 不会复制到 `dist/`，因此附件流量由 GitHub 承担。
 
 网页正常显示所必需的图片、CSS 和 JavaScript 仍应放在
 `src/pages/<slug>/`，不要放在这里。

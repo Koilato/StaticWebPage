@@ -33,17 +33,21 @@ npm run add-page -- \
 
 ## Ref 与附件
 
-每个页面构建后都会在末尾包含一个 `Ref` 章节。附件放在
-`references/<slug>/`，并登记到 `pages.json`：
+每个源 HTML 都必须在正文末尾直接包含完整的 Ref 章节。附件放在
+`references/<slug>/`，AI 根据文件路径生成 GitHub Raw 链接并写入 HTML：
 
-```json
-"references": [
-  {
-    "title": "排障命令清单",
-    "description": "正文中使用的命令和说明",
-    "file": "references/network-tun-repair/commands.txt"
-  }
-]
+```html
+<section id="ref">
+  <h2>Ref</h2>
+  <ul>
+    <li>
+      <a href="https://raw.githubusercontent.com/Koilato/StaticWebPage/main/references/network-tun-repair/commands.txt">
+        排障命令清单
+      </a>
+      <p>正文中使用的命令和说明。</p>
+    </li>
+  </ul>
+</section>
 ```
 
 生成的链接指向：
@@ -52,7 +56,8 @@ npm run add-page -- \
 https://raw.githubusercontent.com/Koilato/StaticWebPage/main/references/<slug>/<文件名>
 ```
 
-附件不进入 `dist/`，因此访问和下载由 GitHub 提供，不经过 Vercel。
+Ref 是源 HTML 的一部分，不由 `pages.json` 或构建脚本生成。附件不进入
+`dist/`，因此访问和下载由 GitHub 提供，不经过 Vercel。
 网页显示所必需的图片、CSS 和 JavaScript 不属于 Ref 附件，仍与页面
 一起放在 `src/pages/<slug>/`。
 
