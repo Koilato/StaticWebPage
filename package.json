@@ -7,7 +7,8 @@
     "add-page": "node scripts/add-page.mjs",
     "build": "node scripts/build.mjs",
     "validate": "node scripts/validate.mjs",
-    "check": "npm run validate && npm run build"
+    "check": "npm run validate && npm run build",
+    "publish:check": "node .agents/skills/publish-static-pages/scripts/preflight.mjs"
   },
   "engines": {
     "node": ">=20"

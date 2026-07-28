@@ -14,12 +14,26 @@ export async function loadAndValidatePages(rootDir) {
   }
 
   const slugs = new Set();
+  const allowedFields = new Set([
+    "slug",
+    "title",
+    "description",
+    "file",
+    "publishedAt",
+    "tags",
+  ]);
 
   for (const [index, page] of pages.entries()) {
     const label = `pages.json 第 ${index + 1} 项`;
 
     if (!page || typeof page !== "object" || Array.isArray(page)) {
       throw new Error(`${label} 必须是对象。`);
+    }
+    const extraFields = Object.keys(page).filter(
+      (field) => !allowedFields.has(field),
+    );
+    if (extraFields.length) {
+      throw new Error(`${label} 包含未允许字段：${extraFields.join(", ")}`);
     }
     if (!SLUG_PATTERN.test(page.slug ?? "")) {
       throw new Error(`${label} 的 slug 无效：${page.slug ?? ""}`);
@@ -39,9 +53,10 @@ export async function loadAndValidatePages(rootDir) {
     }
     if (
       !Array.isArray(page.tags) ||
-      page.tags.some((tag) => typeof tag !== "string" || !tag.trim())
+      page.tags.some((tag) => typeof tag !== "string" || !tag.trim()) ||
+      new Set(page.tags).size !== page.tags.length
     ) {
-      throw new Error(`${label} 的 tags 必须是字符串数组。`);
+      throw new Error(`${label} 的 tags 必须是无重复项的字符串数组。`);
     }
     const expectedFile = path.posix.join(
       "src/pages",
@@ -94,12 +109,25 @@ async function validateLocalReferences(rootDir, page) {
 
 async function validateHtmlRefSection(rootDir, page) {
   const html = await readFile(path.join(rootDir, page.file), "utf8");
-  const sectionMatch = html.match(
-    /<section\b[^>]*\bid=["']ref["'][^>]*>([\s\S]*?)<\/section>/i,
-  );
+  const refMatches = [
+    ...html.matchAll(
+      /<section\b[^>]*\bid=["']ref["'][^>]*>([\s\S]*?)<\/section>/gi,
+    ),
+  ];
 
-  if (!sectionMatch) {
-    throw new Error(`${page.slug} 的源 HTML 缺少 <section id="ref">。`);
+  if (refMatches.length !== 1) {
+    throw new Error(
+      `${page.slug} 的源 HTML 必须且只能有一个 <section id="ref">。`,
+    );
+  }
+
+  const sectionMatch = refMatches[0];
+  const mainEnd = html.toLowerCase().lastIndexOf("</main>");
+  const laterSection = [
+    ...html.matchAll(/<section\b[^>]*>/gi),
+  ].some((match) => match.index > sectionMatch.index && match.index < mainEnd);
+  if (mainEnd === -1 || sectionMatch.index > mainEnd || laterSection) {
+    throw new Error(`${page.slug} 的 Ref 必须是 </main> 前的最后一个 section。`);
   }
 
   const githubRawBase =

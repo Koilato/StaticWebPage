@@ -1,0 +1,4 @@
+interface:
+  display_name: "静态网页发布"
+  short_description: "修改静态 HTML、管理 Ref 文件并发布到 GitHub 与 Vercel"
+  default_prompt: "使用 $publish-static-pages 将这个静态 HTML 加入集合站，处理 Ref 文件并发布。"
