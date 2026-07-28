@@ -1,4 +1,4 @@
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -43,6 +43,9 @@ export async function loadAndValidatePages(rootDir) {
     ) {
       throw new Error(`${label} 的 tags 必须是字符串数组。`);
     }
+    if (!Array.isArray(page.references)) {
+      throw new Error(`${label} 的 references 必须是数组。`);
+    }
 
     const expectedFile = path.posix.join(
       "src/pages",
@@ -57,6 +60,7 @@ export async function loadAndValidatePages(rootDir) {
 
     await access(path.join(rootDir, page.file));
     await validateLocalReferences(rootDir, page);
+    await validateDownloadReferences(rootDir, page, label);
   }
 
   return pages;
@@ -88,6 +92,50 @@ async function validateLocalReferences(rootDir, page) {
       await access(path.resolve(pageDir, relativePath));
     } catch {
       throw new Error(`${page.slug} 引用了缺失资源：${reference}`);
+    }
+  }
+}
+
+async function validateDownloadReferences(rootDir, page, label) {
+  const files = new Set();
+  const expectedPrefix = `references/${page.slug}/`;
+
+  for (const [index, reference] of page.references.entries()) {
+    const referenceLabel = `${label} 的第 ${index + 1} 个 reference`;
+
+    if (
+      !reference ||
+      typeof reference !== "object" ||
+      Array.isArray(reference)
+    ) {
+      throw new Error(`${referenceLabel} 必须是对象。`);
+    }
+    for (const field of ["title", "description", "file"]) {
+      if (
+        typeof reference[field] !== "string" ||
+        !reference[field].trim()
+      ) {
+        throw new Error(`${referenceLabel} 缺少有效的 ${field}。`);
+      }
+    }
+
+    const normalizedFile = path.posix.normalize(reference.file);
+    if (
+      normalizedFile !== reference.file ||
+      !reference.file.startsWith(expectedPrefix)
+    ) {
+      throw new Error(
+        `${referenceLabel} 的 file 必须位于 ${expectedPrefix} 下。`,
+      );
+    }
+    if (files.has(reference.file)) {
+      throw new Error(`${referenceLabel} 重复使用文件：${reference.file}`);
+    }
+    files.add(reference.file);
+
+    const fileStat = await stat(path.join(rootDir, reference.file));
+    if (!fileStat.isFile()) {
+      throw new Error(`${referenceLabel} 不是文件：${reference.file}`);
     }
   }
 }

@@ -1,4 +1,4 @@
-import { cp, mkdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { escapeHtml, loadAndValidatePages } from "./site-utils.mjs";
@@ -7,6 +7,10 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const distDir = path.join(rootDir, "dist");
 const siteUrl = (process.env.SITE_URL ?? "https://static-web-page-pied.vercel.app")
   .replace(/\/+$/, "");
+const githubRawBase = (
+  process.env.GITHUB_RAW_BASE ??
+  "https://raw.githubusercontent.com/Koilato/StaticWebPage/main"
+).replace(/\/+$/, "");
 const pages = await loadAndValidatePages(rootDir);
 
 await rm(distDir, { recursive: true, force: true });
@@ -14,7 +18,12 @@ await mkdir(distDir, { recursive: true });
 
 for (const page of pages) {
   const sourceDir = path.dirname(path.join(rootDir, page.file));
-  await cp(sourceDir, path.join(distDir, page.slug), { recursive: true });
+  const outputDir = path.join(distDir, page.slug);
+  const outputFile = path.join(outputDir, "index.html");
+  await cp(sourceDir, outputDir, { recursive: true });
+
+  const html = await readFile(outputFile, "utf8");
+  await writeFile(outputFile, injectRefSection(html, page), "utf8");
 }
 
 await writeFile(path.join(distDir, "index.html"), renderIndex(pages), "utf8");
@@ -116,4 +125,46 @@ function renderSitemap(entries) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>
 `;
+}
+
+function injectRefSection(html, page) {
+  const marker = "<!-- STATICWEBPAGE_REF -->";
+  const section = renderRefSection(page);
+
+  if (html.includes(marker)) {
+    return html.replace(marker, section);
+  }
+
+  for (const closingTag of ["</main>", "</body>"]) {
+    const index = html.toLowerCase().lastIndexOf(closingTag);
+    if (index !== -1) {
+      return `${html.slice(0, index)}${section}\n${html.slice(index)}`;
+    }
+  }
+
+  throw new Error(`${page.slug} 缺少 </main> 或 </body>，无法插入 Ref 章节。`);
+}
+
+function renderRefSection(page) {
+  const content = page.references.length
+    ? `<ul style="display:grid;gap:12px;margin:0;padding-left:22px">${page.references
+        .map((reference) => {
+          const url = `${githubRawBase}/${encodePath(reference.file)}`;
+          return `<li>
+            <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(reference.title)}</a>
+            <div style="margin-top:3px;color:inherit;opacity:.72">${escapeHtml(reference.description)}</div>
+          </li>`;
+        })
+        .join("")}</ul>`
+    : `<p style="margin:0;opacity:.72">暂无关联文件。</p>`;
+
+  return `<section id="ref" data-staticwebpage-ref style="width:min(1120px,calc(100% - 32px));margin:34px auto;padding:26px 28px;border:1px solid rgba(127,127,127,.28);border-radius:18px">
+    <h2 style="margin-top:0">Ref</h2>
+    <p style="opacity:.72">相关文件由 GitHub 直接提供，打开或下载不会经过本站的 Vercel 流量。</p>
+    ${content}
+  </section>`;
+}
+
+function encodePath(file) {
+  return file.split("/").map(encodeURIComponent).join("/");
 }
