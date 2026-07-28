@@ -57,34 +57,3 @@ HTML、CSS、JavaScript、字体和页面显示所需图片属于运行资源。
 }
 ```
 
-## Ref HTML
-
-有附件时，每个附件使用一个独立 `li`：
-
-```html
-<section id="ref">
-  <h2>Ref</h2>
-  <p>以下文件由 GitHub 直接提供，下载不经过 Vercel。</p>
-  <ul>
-    <li>
-      <a
-        href="<该附件的最终 GitHub Raw URL>"
-        target="_blank"
-        rel="noopener noreferrer"
-      >文件显示名称</a>
-      <p>说明文件内容和用途。</p>
-    </li>
-  </ul>
-</section>
-```
-
-没有附件时使用：
-
-```html
-<section id="ref">
-  <h2>Ref</h2>
-  <p>暂无关联文件。</p>
-</section>
-```
-
-允许添加与页面一致的 `class`，但不得改变元素的语义关系。附件目录中的每个文件必须在 Ref 中恰好出现一次；链接目标必须属于当前 slug，显示名称和用途说明均不得为空。
