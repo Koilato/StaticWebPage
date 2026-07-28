@@ -2,6 +2,19 @@
 name: publish-static-pages
 description: 在 StaticWebPage 仓库中新增、更新、替换或发布静态 HTML 页面及其 Ref 附件；包括维护页面界面、仓库登记、GitHub 发布和 Vercel 正式环境验证。用户要求处理该仓库的静态页面或附件时使用。
 ---
+# 全局流程
+
+用户提供 HTML 和 Ref 文件
+        ↓
+AI 确定页面 slug 和文件存放位置
+        ↓
+AI生成对应的 GitHub Raw 链接
+        ↓
+AI直接修改 HTML的名称为index.html，并在正文最后加入完整 Ref 章节
+        ↓
+AI 上传 HTML 文件和ref文件 分别到src/pages/<slug>/index.html 和 references/<slug>/
+        ↓
+Vercel 自动构建
 
 # 静态页面发布
 
