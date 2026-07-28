@@ -13,10 +13,10 @@
 
 Raw URL 在此前缀后拼接附件的仓库相对路径。对路径中的每个段分别进行 UTF-8 百分号编码，保留 `/` 分隔符；不得使用 Vercel `/references/...`、GitHub blob 页面、其他分支或其他 slug。
 
-例如仓库文件 `references/example-page/诊断 报告.pdf` 对应：
+例如仓库文件 `references/<slug>/诊断 报告.pdf` 对应：
 
 ```text
-https://raw.githubusercontent.com/Koilato/StaticWebPage/main/references/example-page/%E8%AF%8A%E6%96%AD%20%E6%8A%A5%E5%91%8A.pdf
+https://raw.githubusercontent.com/Koilato/StaticWebPage/main/references/<slug>/%E8%AF%8A%E6%96%AD%20%E6%8A%A5%E5%91%8A.pdf
 ```
 
 ## 新增页面的唯一命令
