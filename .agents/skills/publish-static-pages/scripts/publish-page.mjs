@@ -1,3 +1,7 @@
+/**
+ * 新页面发布入口：校验本地输入与仓库状态，写入页面登记，执行预检，
+ * 并按显式模式选择仅演练回滚，或提交并推送。
+ */
 import { spawnSync } from "node:child_process";
 import {
   cp,
@@ -13,32 +17,29 @@ import {
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// 固定发布目标。
 const ORIGIN = "https://github.com/Koilato/StaticWebPage.git";
 const SITE = "https://static-web-page-pied.vercel.app";
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-const VERIFY_ATTEMPTS = positiveInteger(
-  process.env.PUBLISH_VERIFY_ATTEMPTS ?? "24",
-  "PUBLISH_VERIFY_ATTEMPTS",
-);
-const VERIFY_INTERVAL_MS = positiveInteger(
-  process.env.PUBLISH_VERIFY_INTERVAL_MS ?? "5000",
-  "PUBLISH_VERIFY_INTERVAL_MS",
-);
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../../../..",
 );
 const options = parseArgs(process.argv.slice(2));
+
+// 记录本次运行产生的可回滚状态；提交成功后不再自动撤销。
 const createdPaths = [];
 let originalRegistry;
 let committed = false;
 let stagedByScript = false;
 
 try {
+  // 阶段一：拒绝歧义参数、脏工作树、错误远端或不同步的 main。
   validateOptions(options);
   verifyRepository();
 
+  // 阶段二：检查来源树安全性及目标唯一性，避免覆盖已有页面。
   const source = path.resolve(options.source);
   const refs = options.ref.map((item) => path.resolve(item));
   const pages = JSON.parse(
@@ -77,6 +78,9 @@ try {
   }
 
   const refInputs = await inspectRefs(refs);
+
+  // 阶段三：复制页面与 Ref，并以可恢复方式追加 pages.json 登记。
+  // 复制页面
   createdPaths.push(pageDestination);
   await mkdir(pageDestination);
   if (sourceStat.isDirectory()) {
@@ -91,7 +95,7 @@ try {
       errorOnExist: true,
     });
   }
-
+  //复制 Ref
   if (refInputs.length) {
     createdPaths.push(refDestination);
     await mkdir(refDestination);
@@ -103,7 +107,7 @@ try {
       });
     }
   }
-
+  // 追加 pages.json
   const registryPath = path.join(repoRoot, "pages.json");
   originalRegistry = await readFile(registryPath, "utf8");
   const entry = {
@@ -123,6 +127,7 @@ try {
     "utf8",
   );
 
+  // 阶段四：统一通过仓库预检验证登记、页面、资源与构建产物。
   run("npm", ["run", "publish:check"], true);
 
   if (options.dryRun) {
@@ -130,6 +135,7 @@ try {
       `Dry run 通过：/${options.slug}/，${await countFiles(refDestination)} 个 Ref 文件；未提交或推送。`,
     );
   } else {
+    // 仅暂存本次 slug 的白名单路径，随后复核暂存区再提交与推送。
     const allowed = [
       "pages.json",
       `src/pages/${options.slug}`,
@@ -149,13 +155,10 @@ try {
     const commit = run("git", ["rev-parse", "HEAD"]).trim();
     run("git", ["push", "origin", "main"], true);
 
-    const refFiles = refInputs.length
-      ? await listFiles(refDestination)
-      : [];
-    await verifyPublished(options.slug, pageDestination, refDestination, refFiles);
-    console.log(`发布完成：${SITE}/${options.slug}/`);
+    const refFileCount = await countFiles(refDestination);
+    console.log(`推送完成；Vercel 页面：${SITE}/${options.slug}/`);
     console.log(`提交：${commit}`);
-    console.log(`Ref 文件：${refFiles.length}`);
+    console.log(`Ref 文件：${refFileCount}`);
   }
 } catch (error) {
   if (!committed) {
@@ -168,6 +171,16 @@ try {
     await cleanup();
   }
 }
+
+/**
+ * 将 CLI 参数解析为发布选项。
+ * `--ref` 可重复，其余带值参数只能出现一次；模式开关仅记录不裁决。
+ *
+ * @param {string[]} args `process.argv` 中的用户参数。
+ * @returns {Record<string, any>} 规范化后的发布选项。
+ */
+
+//函数在这里被调用const options = parseArgs(process.argv.slice(2));
 
 function parseArgs(args) {
   const result = { ref: [], dryRun: false, push: false };
@@ -214,6 +227,12 @@ function parseArgs(args) {
   return result;
 }
 
+/**
+ * 校验必填字段、互斥运行模式以及 slug/日期格式。
+ *
+ * @param {Record<string, any>} value 已解析的发布选项。
+ * @throws {Error} 参数不完整、模式不唯一或格式非法时抛出。
+ */
 function validateOptions(value) {
   for (const required of ["source", "slug", "title"]) {
     if (!value[required]) usage(`缺少 --${required}。`);
@@ -229,6 +248,11 @@ function validateOptions(value) {
   }
 }
 
+/**
+ * 确认发布发生在干净、同步且指向指定 origin 的 main 分支。
+ *
+ * @throws {Error} 仓库状态不满足安全发布前提时抛出。
+ */
 function verifyRepository() {
   if (run("git", ["status", "--porcelain", "--untracked-files=all"])) {
     throw new Error("工作树不干净；发布前请提交、移走或清理现有改动。");
@@ -247,6 +271,13 @@ function verifyRepository() {
   }
 }
 
+/**
+ * 检查 Ref 输入树，并生成不会发生顶层名称覆盖的复制清单。
+ *
+ * @param {string[]} refs Ref 文件或目录的绝对路径。
+ * @returns {Promise<Array<{source: string, name: string, isDirectory: boolean}>>}
+ * @throws {Error} 输入类型非法、含危险内容或顶层名称冲突时抛出。
+ */
 async function inspectRefs(refs) {
   const names = new Set();
   const inputs = [];
@@ -266,12 +297,23 @@ async function inspectRefs(refs) {
   return inputs;
 }
 
+/**
+ * 验证暂存区恰好包含登记文件及本次页面/Ref 的全部文件。
+ *
+ * @param {string} slug 页面稳定标识。
+ * @param {string} pageDirectory 页面目录。
+ * @param {string} refDirectory Ref 目录。
+ * @param {boolean} hasRefs 是否预期存在 Ref。
+ * @returns {Promise<void>}
+ * @throws {Error} 暂存文件缺失或超出白名单时抛出。
+ */
 async function verifyStagedFiles(
   slug,
   pageDirectory,
   refDirectory,
   hasRefs,
 ) {
+  // 已存储的文件
   const staged = run("git", [
     "diff",
     "--cached",
@@ -287,6 +329,7 @@ async function verifyStagedFiles(
   if (!staged.includes(`src/pages/${slug}/index.html`)) {
     throw new Error("暂存区缺少页面 index.html。");
   }
+  //预期存储的文件
   const expected = new Set([
     "pages.json",
     ...(await listFiles(pageDirectory)).map(
@@ -298,6 +341,7 @@ async function verifyStagedFiles(
         )
       : []),
   ]);
+
   const actual = new Set(staged);
   const missing = [...expected].filter((file) => !actual.has(file));
   const extra = [...actual].filter((file) => !expected.has(file));
@@ -313,67 +357,13 @@ async function verifyStagedFiles(
   }
 }
 
-async function verifyPublished(slug, pageDirectory, refDirectory, refFiles) {
-  const expectedPage = await readFile(path.join(pageDirectory, "index.html"));
-  const pageAssets = (await listFiles(pageDirectory)).filter(
-    (file) => file !== "index.html",
-  );
-  const checks = [
-    {
-      label: "Vercel 目录首页",
-      url: `${SITE}/`,
-      expected: readFile(path.join(repoRoot, "dist", "index.html")),
-    },
-    {
-      label: "Vercel 页面",
-      url: `${SITE}/${slug}/`,
-      expected: expectedPage,
-    },
-    ...pageAssets.map((file) => ({
-      label: `Vercel 页面资源 ${file}`,
-      url: `${SITE}/${slug}/${encodePath(file)}`,
-      expected: readFile(path.join(pageDirectory, file)),
-    })),
-    ...refFiles.map((file) => ({
-      label: `GitHub Raw ${file}`,
-      url:
-        `https://raw.githubusercontent.com/Koilato/StaticWebPage/main/` +
-        `references/${slug}/${encodePath(file)}`,
-      expected: readFile(path.join(refDirectory, file)),
-    })),
-  ];
-
-  for (const check of checks) {
-    check.expected = await check.expected;
-  }
-  let lastError;
-  for (let attempt = 1; attempt <= VERIFY_ATTEMPTS; attempt += 1) {
-    try {
-      for (const check of checks) {
-        const separator = check.url.includes("?") ? "&" : "?";
-        const response = await fetch(`${check.url}${separator}publish=${Date.now()}`, {
-          cache: "no-store",
-          signal: AbortSignal.timeout(10_000),
-        });
-        if (!response.ok) {
-          throw new Error(`${check.label} 返回 HTTP ${response.status}`);
-        }
-        const actual = Buffer.from(await response.arrayBuffer());
-        if (!actual.equals(check.expected)) {
-          throw new Error(`${check.label} 内容尚未更新`);
-        }
-      }
-      return;
-    } catch (error) {
-      lastError = error;
-      if (attempt < VERIFY_ATTEMPTS) {
-        await new Promise((resolve) => setTimeout(resolve, VERIFY_INTERVAL_MS));
-      }
-    }
-  }
-  throw new Error(`线上验证失败：${lastError?.message ?? "未知错误"}`);
-}
-
+/**
+ * 递归列出目录中的普通文件，并返回 POSIX 风格相对路径。
+ *
+ * @param {string} directory 根目录。
+ * @param {string} [prefix=""] 当前递归前缀。
+ * @returns {Promise<string[]>}
+ */
 async function listFiles(directory, prefix = "") {
   const files = [];
   for (const entry of await readdir(path.join(directory, prefix), {
@@ -389,6 +379,13 @@ async function listFiles(directory, prefix = "") {
   return files;
 }
 
+/**
+ * 递归检查输入树，只允许普通文件/目录，并拒绝符号链接和敏感文件。
+ *
+ * @param {string} target 待检查路径。
+ * @param {string} label 用于错误定位的 CLI 参数名。
+ * @returns {Promise<void>}
+ */
 async function inspectInputTree(target, label) {
   const targetStat = await lstat(target);
   if (targetStat.isSymbolicLink()) {
@@ -406,6 +403,13 @@ async function inspectInputTree(target, label) {
   }
 }
 
+/**
+ * 以文件名规则和文件头采样识别常见凭据、Cookie 与私钥。
+ *
+ * @param {string} file 待检查文件。
+ * @param {string} label 用于错误定位的 CLI 参数名。
+ * @returns {Promise<void>}
+ */
 async function inspectSensitiveFile(file, label) {
   const name = path.basename(file).toLowerCase();
   if (
@@ -436,6 +440,12 @@ async function inspectSensitiveFile(file, label) {
   }
 }
 
+/**
+ * 统计目录内普通文件；目录不存在视为零个 Ref。
+ *
+ * @param {string} directory 待统计目录。
+ * @returns {Promise<number>}
+ */
 async function countFiles(directory) {
   try {
     return (await listFiles(directory)).length;
@@ -445,6 +455,12 @@ async function countFiles(directory) {
   }
 }
 
+/**
+ * 在提交前失败或演练结束时，撤销本脚本暂存与落盘的所有变更。
+ * 恢复 pages.json 后重新构建，避免 dist 遗留演练产物。
+ *
+ * @returns {Promise<void>}
+ */
 async function cleanup() {
   let registryRestored = false;
   if (stagedByScript) {
@@ -471,6 +487,12 @@ async function cleanup() {
   }
 }
 
+/**
+ * 要求发布目标尚不存在，确保新增流程不会覆盖历史内容。
+ *
+ * @param {string} target 预期不存在的路径。
+ * @returns {Promise<void>}
+ */
 async function requireMissing(target) {
   try {
     await stat(target);
@@ -480,24 +502,28 @@ async function requireMissing(target) {
   }
 }
 
-function encodePath(value) {
-  return value.split("/").map(encodeURIComponent).join("/");
-}
-
+/**
+ * 断言仓库配置值与发布要求完全一致。
+ *
+ * @param {string} actual 实际值。
+ * @param {string} expected 期望值。
+ * @param {string} label 配置项名称。
+ */
 function requireEqual(actual, expected, label) {
   if (actual !== expected) {
     throw new Error(`${label} 必须为 ${expected}，实际为 ${actual || "未设置"}。`);
   }
 }
 
-function positiveInteger(raw, label) {
-  const value = Number(raw);
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new Error(`${label} 必须是正整数。`);
-  }
-  return value;
-}
-
+/**
+ * 在仓库根目录同步执行命令，并统一处理输出继承与失败策略。
+ *
+ * @param {string} command 可执行命令。
+ * @param {string[]} args 命令参数。
+ * @param {boolean} [inherit=false] 是否把子进程输出直接交给当前终端。
+ * @param {boolean} [allowFailure=false] 是否容忍非零退出码。
+ * @returns {string} 捕获到的标准输出；继承输出时通常为空。
+ */
 function run(command, args, inherit = false, allowFailure = false) {
   const result = spawnSync(command, args, {
     cwd: repoRoot,
@@ -512,6 +538,12 @@ function run(command, args, inherit = false, allowFailure = false) {
   return result.stdout ?? "";
 }
 
+/**
+ * 以统一用法说明终止 CLI 参数处理。
+ *
+ * @param {string} message 具体参数错误。
+ * @throws {Error} 始终抛出。
+ */
 function usage(message) {
   throw new Error(
     `${message}\n用法：npm run publish:page -- --source <HTML或目录> --slug <slug> --title <标题> ` +
