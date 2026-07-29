@@ -112,7 +112,6 @@ slug用于作为一个唯一索引号，必须要在初次运行时就确定好�
 | 文件 | 何时读取 | 是否必需 | 输入 | 输出 |
 | --- | --- | --- | --- | --- |
 | [编辑静态界面](references/edit-static-ui.md) | 新增 HTML，或改变已有页面的正文、样式、脚本、资源引用、Ref 区块 | 涉及 HTML 时必需 | 原 HTML、运行资源、Ref 清单 | 可直接入库的最终 HTML 与资源 |
-| [仓库布局](references/repository-layout.md) | 判断文件归属、创建目录、编辑 `pages.json` 或生成 Ref 结构 | 新增必需；更新附件、目录或登记信息时必需 | 最终 HTML、页面元数据、附件清单 | 合法目录、登记项和 Ref 标记 |
 | [GitHub 发布](references/github-publish.md) | 需要用 `publish:page` 新增，或需要提交、推送、生成 Raw 链接 | 发布到 GitHub 时必需 | 已校验的页面改动或新增命令输入 | `main` 上的提交与可访问 Raw 地址 |
 | [Vercel 部署](references/vercel-deployment.md) | 已推送 `main`，需要等待并验证正式环境 | 对外发布时必需 | slug、本次提交、预期页面内容和 Raw 地址 | 正式页面与附件的验证结果 |
 
