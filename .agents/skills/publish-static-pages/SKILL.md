@@ -69,11 +69,11 @@ slug用于作为一个唯一索引号，必须要在初次运行时就确定好�
 
 ### ref文件和html放置的规则
 
-1.正确提取出"slug"之后将这里的html改名为index.html 
-2.html文件放在：“src/pages/<slug>/”内
-3.html文件内如果有本地的静态资源，需要放在“src/pages/<slug>/assets/”并修改源代码中的链接
-4.ref文件放在“references/<slug>/”内
-5.仓库地址为"https://github.com/Koilato/StaticWebPage/tree/main/",以此获取了完整的ref文件的链接地址，后面这个内容会放在html的ref的章节中
+1. 正确提取出"slug"之后将这里的html改名为index.html 
+2. html文件放在：“src/pages/<slug>/”内
+3. html文件内如果有本地的静态资源，需要放在“src/pages/<slug>/assets/”并修改源代码中的链接
+4. ref文件放在“references/<slug>/”内
+5. 仓库地址为"https://github.com/Koilato/StaticWebPage/tree/main/",以此获取了完整的ref文件的链接地址，后面这个内容会放在html的ref的章节中
 
 
 ### pages.json规则
