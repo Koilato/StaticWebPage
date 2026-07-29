@@ -5,10 +5,10 @@ description: 在 StaticWebPage 仓库中新增、更新、替换或发布静态 
 # 全局流程
 
 1. 用户提供 HTML 和 Ref 文件 
-2. AI 确定页面 slug 和文件存放位置-
-3. AI生成对应的 GitHub Raw 链接
-4. AI直接修改 HTML的名称为index.html，并在正文最后加入完整 Ref 章节
-5. AI 上传 HTML 文件和ref文件 分别到src/pages/<slug>/index.html 和 references/<slug>/
+2. AI 确定页面 slug 和文件存放位置，并生成ref文件的 GitHub Raw 链接
+3. AI直接修改 HTML的名称为index.html，并在正文最后加入完整 Ref 章节，具体目录为：references/<slug>/
+4. AI 上传 HTML 文件和ref文件 分别到src/pages/<slug>/index.html 和 references/<slug>/
+5. 修改pages.json
 6. Vercel 自动构建
 
 # 静态页面发布
@@ -17,26 +17,95 @@ description: 在 StaticWebPage 仓库中新增、更新、替换或发布静态 
 
 后续命令一律在 `git rev-parse --show-toplevel` 返回的仓库根目录执行；该目录必须同时包含 `pages.json`、`package.json` 和 `vercel.json`。
 
+## github仓库信息
 
-## 输入
+- 仓库：`https://github.com/Koilato/StaticWebPage.git`
+- 远端：`origin`
+- 生产分支：`main`
+- Raw 前缀：`https://raw.githubusercontent.com/Koilato/StaticWebPage/main/`
+
+## 标准的仓库目录结构
+ 
+```text
+StaticWebPage/
+├── .agents/skills/publish-static-pages/
+│   ├── SKILL.md
+│   ├── references/
+│   └── scripts/
+├── src/pages/<slug>/
+│   ├── index.html
+│   └── assets/
+├── references/<slug>/
+├── scripts/
+├── pages.json
+├── package.json
+├── vercel.json
+└── dist/
+```
+
+## 提前准备的内容
 
 开始前确定：
 
 - 操作类型：新增页面，或更新已有页面；
 - HTML 文件和ref文件来源；
 - Ref 文件或目录；可以为空；
-- 标题、简介、标签；
 - slug；默认使用由HTML文件名称生成，如果为中文默认转为英文。
+- pages.json：让构建脚本知道有哪些页面，并自动生成网站目录首页和 sitemap
+- ref文件和静态html放置的位置
 
-slug 必须稳定、可读且能唯一对应页面。纯中文标题无法稳定生成英文 slug，或生成结果存在多种合理选择时，必须询问用户，不得自行使用随意拼音、翻译、序号或哈希。
 
-slug 必须匹配：
+### slug规则
 
-```text
-^[a-z0-9]+(?:-[a-z0-9]+)*$
+slug用于作为一个唯一索引号，必须要在初次运行时就确定好。
+
+其中：
+1.slug 发布后永久稳定，不因标题变化而修改，也不得复用给其他页面。
+2.纯中文标题需要转成为英文，再生成slug。
+3.不得自行使用拼音、序号或哈希。
+4.slug样例：“network-tun-repair”
+5.slug 必须匹配：^[a-z]+(?:-[a-z0-9]+)*$
+
+
+### ref文件和html放置的规则
+
+1.正确提取出"slug"之后将这里的html改名为index.html 
+2.html文件放在：“src/pages/<slug>/”内
+3.html文件内如果有本地的静态资源，需要放在“src/pages/<slug>/assets/”并修改源代码中的链接
+4.ref文件放在“references/<slug>/”内
+5.仓库地址为"https://github.com/Koilato/StaticWebPage/tree/main/",以此获取了完整的ref文件的链接地址，后面这个内容会放在html的ref的章节中
+
+
+### pages.json规则
+
+这是pages.json的标准范例，后续的内容需要使用append的方式追加
+
+| 字段 | 要求 |
+| --- | --- |
+| `slug` | 唯一且符合 slug 规则 |
+| `title` | 非空字符串 |
+| `description` | 非空字符串 |
+| `file` | 精确为 `src/pages/<slug>/index.html` |
+| `publishedAt` | `YYYY-MM-DD` |
+| `tags` | 无重复非空字符串数组 |
+
+```json
+[
+  {
+    "slug": "network-tun-repair",
+    "title": "v2rayN TUN 网络修复",
+    "description": "完整推理与操作记录",
+    "file": "src/pages/network-tun-repair/index.html",
+    "publishedAt": "2026-07-28",
+    "tags": ["网络", "TUN", "故障排查"]
+  },
+]
 ```
 
-slug 发布后永久稳定，不因标题变化而修改，也不得复用给其他页面。
+其中
+1.title,description,publishedAt,tags都需要ai阅读html生成
+2.file字段:src/pages/<slug>/index.html
+
 
 ## 文件路由
 
