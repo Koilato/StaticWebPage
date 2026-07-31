@@ -4,8 +4,9 @@ import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 // 导入“文件 URL 转本机路径”函数，用于处理 import.meta.url。
 import { fileURLToPath } from "node:url";
-// 从项目自定义模块导入 HTML 转义函数，以及页面配置加载与校验函数。
-import { escapeHtml, loadAndValidatePages } from "./site-utils.mjs";
+import { generatePages } from "./generate-pages.mjs";
+// 从项目自定义模块导入 HTML 转义函数。
+import { escapeHtml } from "./site-utils.mjs";
 
 // import.meta.url 是当前脚本的 file: URL；转为本机路径并取父目录，得到仓库根目录。
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -14,8 +15,8 @@ const distDir = path.join(rootDir, "dist");
 // 允许部署环境覆盖站点域名，并去掉末尾斜杠，避免拼接 URL 时产生双斜杠。
 const siteUrl = (process.env.SITE_URL ?? "https://static-web-page-pied.vercel.app")
   .replace(/\/+$/, "");
-// 加载并校验 pages.json；await 取得 Promise 成功完成后返回的页面数组。
-const pages = await loadAndValidatePages(rootDir);
+// 聚合并校验分散的 page.json，同时生成统一 pages.json。
+const pages = await generatePages(rootDir);
 
 // 删除旧 dist，创建空 dist。recursive 允许删除整个目录，force 使目录不存在时也不报错。
 await rm(distDir, { recursive: true, force: true });

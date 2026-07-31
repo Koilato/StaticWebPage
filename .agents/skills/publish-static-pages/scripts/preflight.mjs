@@ -4,7 +4,6 @@ import path from "node:path";
 
 const repoRoot = path.resolve(process.argv[2] ?? process.cwd());
 
-await requirePath("pages.json");
 await requirePath("package.json");
 await requirePath("vercel.json");
 await requirePath("src/pages");
@@ -15,18 +14,28 @@ const vercelJson = await readJson("vercel.json");
 
 requireEqual(packageJson.scripts?.build, "node scripts/build.mjs", "build 脚本");
 requireEqual(
+  packageJson.scripts?.["check:generated"],
+  "node scripts/check-generated-files.mjs",
+  "构建产物跟踪检查",
+);
+requireEqual(
+  packageJson.scripts?.["generate:pages"],
+  "node scripts/generate-pages.mjs",
+  "索引生成脚本",
+);
+requireEqual(
   packageJson.scripts?.validate,
   "node scripts/validate.mjs",
   "validate 脚本",
 );
 requireEqual(
   packageJson.scripts?.check,
-  "npm run test && npm run validate && npm run build",
+  "npm run check:generated && npm run test && npm run validate && npm run build",
   "check 脚本",
 );
 requireEqual(
   packageJson.scripts?.test,
-  "node --test scripts/site-utils.test.mjs",
+  "node --test scripts/site-utils.test.mjs scripts/check-generated-files.test.mjs .agents/skills/publish-static-pages/scripts/publish-page.test.mjs",
   "test 脚本",
 );
 requireEqual(
@@ -37,18 +46,9 @@ requireEqual(
 requireEqual(vercelJson.buildCommand, "npm run build", "Vercel buildCommand");
 requireEqual(vercelJson.outputDirectory, "dist", "Vercel outputDirectory");
 
-const branch = run("git", ["branch", "--show-current"]).trim();
-requireEqual(branch, "main", "当前 Git 分支");
-
-const remote = run("git", ["remote", "get-url", "origin"]).trim();
-requireEqual(
-  remote,
-  "https://github.com/Koilato/StaticWebPage.git",
-  "Git origin",
-);
-
 run("npm", ["run", "check"], true);
 
+await requirePath("pages.json");
 const pages = await readJson("pages.json");
 for (const page of pages) {
   const source = await readFile(path.join(repoRoot, page.file));

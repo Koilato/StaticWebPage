@@ -26,9 +26,9 @@ Ref 链接使用最终 GitHub Raw 地址。即使没有附件，也必须保留�
 
 ## Ref 文件链接
 
-ref中的文件链接来自于github
+Ref 文件使用最终 main 分支的 GitHub Raw 地址，并对每个路径段分别进行 URL 编码：
 
-` https://github.com/Koilato/StaticWebPage/tree/main/reference/<slug>/“文件名” `
+`https://raw.githubusercontent.com/Koilato/StaticWebPage/main/references/<slug>/<文件名>`
 
 ## Ref HTML
 

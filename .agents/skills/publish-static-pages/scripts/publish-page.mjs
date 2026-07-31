@@ -1,189 +1,69 @@
-/**
- * 新页面发布入口：校验本地输入与仓库状态，写入页面登记，执行预检，
- * 并按显式模式选择仅演练回滚，或提交并推送。
- */
-import { spawnSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import {
   cp,
   lstat,
   mkdir,
-  open,
+  mkdtemp,
   readFile,
   readdir,
   rm,
-  stat,
   writeFile,
 } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadAndValidatePages } from "../../../../scripts/site-utils.mjs";
 
-// 固定发布目标。
-const ORIGIN = "https://github.com/Koilato/StaticWebPage.git";
+const OWNER = "Koilato";
+const REPO = "StaticWebPage";
+const DEFAULT_BRANCH = "main";
 const SITE = "https://static-web-page-pied.vercel.app";
+const API_ROOT = "https://api.github.com";
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-const repoRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../../..",
-);
-const options = parseArgs(process.argv.slice(2));
+const WARNING_SIZE = 50 * 1024 * 1024;
+const MAX_SIZE = 100 * 1024 * 1024;
+const REQUIRED_CHECK = "publish-check";
+const REQUIRED_WORKFLOW_PATH = ".github/workflows/publish-check.yml";
+const GITHUB_ACTIONS_INTEGRATION_ID = 15368;
+const SENSITIVE_PATTERNS = [
+  {
+    label: "GitHub 令牌",
+    pattern: /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/,
+  },
+  {
+    label: "Authorization 凭据",
+    pattern:
+      /\bauthorization\s*[:=]\s*["'`]?(?:bearer|basic)\s+[A-Za-z0-9._~+/-]{8,}/i,
+  },
+  {
+    label: "Cookie",
+    pattern:
+      /\b(?:cookie|set-cookie)\s*[:=]\s*(?:["'`][^"'`\r\n]{8,}|[^\s;"'`]{8,})/i,
+  },
+  {
+    label: "密码或访问密钥",
+    pattern:
+      /\b(?:password|passwd|pwd|api[_-]?key|client[_-]?secret|access[_-]?token)\s*[:=]\s*(?:["'`][^"'`\r\n]{8,}|[^\s,;#"'`]{8,})/i,
+  },
+  {
+    label: "带密码的连接串",
+    pattern:
+      /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^/\s:@]+:[^@\s/]+@/i,
+  },
+  {
+    label: "私钥",
+    pattern: /-----BEGIN (?:RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----/,
+  },
+];
 
-// 记录本次运行产生的可回滚状态；提交成功后不再自动撤销。
-const createdPaths = [];
-let originalRegistry;
-let committed = false;
-let stagedByScript = false;
-
-try {
-  // 阶段一：拒绝歧义参数、脏工作树、错误远端或不同步的 main。
-  validateOptions(options);
-  verifyRepository();
-
-  // 阶段二：检查来源树安全性及目标唯一性，避免覆盖已有页面。
-  const source = path.resolve(options.source);
-  const refs = options.ref.map((item) => path.resolve(item));
-  const pages = JSON.parse(
-    await readFile(path.join(repoRoot, "pages.json"), "utf8"),
-  );
-  if (!Array.isArray(pages)) {
-    throw new Error("pages.json 必须是数组。");
-  }
-  if (pages.some((page) => page.slug === options.slug)) {
-    throw new Error(`slug 已存在，不支持更新已有页面：${options.slug}`);
-  }
-
-  const pageDestination = path.join(
-    repoRoot,
-    "src",
-    "pages",
-    options.slug,
-  );
-  const refDestination = path.join(repoRoot, "references", options.slug);
-  await requireMissing(pageDestination);
-  await requireMissing(refDestination);
-
-  const sourceStat = await lstat(source);
-  await inspectInputTree(source, "--source");
-  if (
-    !sourceStat.isDirectory() &&
-    !(sourceStat.isFile() && path.extname(source).toLowerCase() === ".html")
-  ) {
-    throw new Error("--source 必须是 HTML 文件或包含 index.html 的目录。");
-  }
-  if (sourceStat.isDirectory()) {
-    const indexStat = await lstat(path.join(source, "index.html"));
-    if (!indexStat.isFile()) {
-      throw new Error("--source 目录必须包含 index.html。");
-    }
-  }
-
-  const refInputs = await inspectRefs(refs);
-
-  // 阶段三：复制页面与 Ref，并以可恢复方式追加 pages.json 登记。
-  // 复制页面
-  createdPaths.push(pageDestination);
-  await mkdir(pageDestination);
-  if (sourceStat.isDirectory()) {
-    await cp(source, pageDestination, {
-      recursive: true,
-      force: false,
-      errorOnExist: true,
-    });
-  } else {
-    await cp(source, path.join(pageDestination, "index.html"), {
-      force: false,
-      errorOnExist: true,
-    });
-  }
-  //复制 Ref
-  if (refInputs.length) {
-    createdPaths.push(refDestination);
-    await mkdir(refDestination);
-    for (const input of refInputs) {
-      await cp(input.source, path.join(refDestination, input.name), {
-        recursive: input.isDirectory,
-        force: false,
-        errorOnExist: true,
-      });
-    }
-  }
-  // 追加 pages.json
-  const registryPath = path.join(repoRoot, "pages.json");
-  originalRegistry = await readFile(registryPath, "utf8");
-  const entry = {
-    slug: options.slug,
-    title: options.title,
-    description: options.description ?? options.title,
-    file: `src/pages/${options.slug}/index.html`,
-    publishedAt: options.date ?? new Date().toISOString().slice(0, 10),
-    tags: (options.tags ?? "")
-      .split(",")
-      .map((tag) => tag.trim())
-      .filter(Boolean),
+export function parseArgs(args) {
+  const result = {
+    ref: [],
+    clearRef: false,
+    dryRun: false,
+    pr: false,
   };
-  await writeFile(
-    registryPath,
-    `${JSON.stringify([...pages, entry], null, 2)}\n`,
-    "utf8",
-  );
-
-  // 阶段四：统一通过仓库预检验证登记、页面、资源与构建产物。
-  run("npm", ["run", "publish:check"], true);
-
-  if (options.dryRun) {
-    console.log(
-      `Dry run 通过：/${options.slug}/，${await countFiles(refDestination)} 个 Ref 文件；未提交或推送。`,
-    );
-  } else {
-    // 仅暂存本次 slug 的白名单路径，随后复核暂存区再提交与推送。
-    const allowed = [
-      "pages.json",
-      `src/pages/${options.slug}`,
-      ...(refInputs.length ? [`references/${options.slug}`] : []),
-    ];
-    stagedByScript = true;
-    run("git", ["add", "--", ...allowed]);
-    await verifyStagedFiles(
-      options.slug,
-      pageDestination,
-      refDestination,
-      refInputs.length > 0,
-    );
-    run("git", ["diff", "--cached", "--check"]);
-    run("git", ["commit", "-m", `Publish ${options.slug}`], true);
-    committed = true;
-    const commit = run("git", ["rev-parse", "HEAD"]).trim();
-    run("git", ["push", "origin", "main"], true);
-
-    const refFileCount = await countFiles(refDestination);
-    console.log(`推送完成；Vercel 页面：${SITE}/${options.slug}/`);
-    console.log(`提交：${commit}`);
-    console.log(`Ref 文件：${refFileCount}`);
-  }
-} catch (error) {
-  if (!committed) {
-    await cleanup();
-  }
-  console.error(error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-} finally {
-  if (options.dryRun && !committed) {
-    await cleanup();
-  }
-}
-
-/**
- * 将 CLI 参数解析为发布选项。
- * `--ref` 可重复，其余带值参数只能出现一次；模式开关仅记录不裁决。
- *
- * @param {string[]} args `process.argv` 中的用户参数。
- * @returns {Record<string, any>} 规范化后的发布选项。
- */
-
-//函数在这里被调用const options = parseArgs(process.argv.slice(2));
-
-function parseArgs(args) {
-  const result = { ref: [], dryRun: false, push: false };
   const valueOptions = new Set([
     "source",
     "slug",
@@ -193,14 +73,19 @@ function parseArgs(args) {
     "date",
     "ref",
   ]);
+
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
+    if (argument === "--clear-ref") {
+      result.clearRef = true;
+      continue;
+    }
     if (argument === "--dry-run") {
       result.dryRun = true;
       continue;
     }
-    if (argument === "--push") {
-      result.push = true;
+    if (argument === "--pr") {
+      result.pr = true;
       continue;
     }
     if (!argument?.startsWith("--")) {
@@ -227,165 +112,622 @@ function parseArgs(args) {
   return result;
 }
 
-/**
- * 校验必填字段、互斥运行模式以及 slug/日期格式。
- *
- * @param {Record<string, any>} value 已解析的发布选项。
- * @throws {Error} 参数不完整、模式不唯一或格式非法时抛出。
- */
-function validateOptions(value) {
+export function validateOptions(options) {
   for (const required of ["source", "slug", "title"]) {
-    if (!value[required]) usage(`缺少 --${required}。`);
+    if (!options[required]) usage(`缺少 --${required}。`);
   }
-  if (value.dryRun === value.push) {
-    usage("必须且只能指定 --dry-run 或 --push。");
+  if (options.dryRun === options.pr) {
+    usage("必须且只能指定 --dry-run 或 --pr。");
   }
-  if (!SLUG_PATTERN.test(value.slug)) {
-    usage(`slug 无效：${value.slug}`);
+  if (options.clearRef && options.ref.length) {
+    usage("--clear-ref 不得与 --ref 同时使用。");
   }
-  if (value.date && !DATE_PATTERN.test(value.date)) {
+  if (!SLUG_PATTERN.test(options.slug)) {
+    usage(`slug 无效：${options.slug}`);
+  }
+  if (options.date && !DATE_PATTERN.test(options.date)) {
     usage("--date 必须使用 YYYY-MM-DD。");
   }
 }
 
-/**
- * 确认发布发生在干净、同步且指向指定 origin 的 main 分支。
- *
- * @throws {Error} 仓库状态不满足安全发布前提时抛出。
- */
-function verifyRepository() {
-  if (run("git", ["status", "--porcelain", "--untracked-files=all"])) {
-    throw new Error("工作树不干净；发布前请提交、移走或清理现有改动。");
+export function selectBlobEncoding(buffer) {
+  if (buffer.includes(0)) {
+    return { content: buffer.toString("base64"), encoding: "base64" };
   }
-  requireEqual(run("git", ["branch", "--show-current"]).trim(), "main", "当前分支");
-  requireEqual(
-    run("git", ["remote", "get-url", "origin"]).trim(),
-    ORIGIN,
-    "origin",
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+    if (Buffer.from(text, "utf8").equals(buffer)) {
+      return { content: text, encoding: "utf-8" };
+    }
+  } catch {
+    // 任意非 UTF-8 字节必须使用 Base64，避免内容损坏。
+  }
+  return { content: buffer.toString("base64"), encoding: "base64" };
+}
+
+export function validateFileSize(size, label, warn = console.warn) {
+  if (size > MAX_SIZE) {
+    throw new Error(`${label} 超过 100 MiB，本版不支持 Git LFS。`);
+  }
+  if (size > WARNING_SIZE) {
+    warn(`${label} 超过 50 MiB，GitHub 建议改用 Git LFS。`);
+  }
+}
+
+export function assertNoSensitiveContent(buffer, label) {
+  const content = buffer.toString("utf8");
+  const match = SENSITIVE_PATTERNS.find(({ pattern }) => pattern.test(content));
+  if (match) {
+    throw new Error(`${label} 包含疑似${match.label}，已停止发布。`);
+  }
+}
+
+export function gitBlobSha(buffer) {
+  return createHash("sha1")
+    .update(`blob ${buffer.length}\0`)
+    .update(buffer)
+    .digest("hex");
+}
+
+export function createGitHubClient({
+  token,
+  fetchImpl = globalThis.fetch,
+  apiRoot = API_ROOT,
+} = {}) {
+  const baseHeaders = {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "StaticWebPage-publisher",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+
+  async function request(apiPath, { method = "GET", body } = {}) {
+    const response = await fetchImpl(`${apiRoot}${apiPath}`, {
+      method,
+      headers: {
+        ...baseHeaders,
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const text = await response.text();
+    let payload;
+    try {
+      payload = text ? JSON.parse(text) : undefined;
+    } catch {
+      payload = text;
+    }
+    if (!response.ok) {
+      const detail =
+        payload && typeof payload === "object"
+          ? payload.message ?? JSON.stringify(payload)
+          : payload;
+      const error = new Error(
+        `GitHub API ${method} ${apiPath} 返回 HTTP ${response.status}` +
+          (detail ? `：${detail}` : ""),
+      );
+      error.status = response.status;
+      throw error;
+    }
+    return payload;
+  }
+
+  async function requestRaw(apiPath) {
+    const response = await fetchImpl(`${apiRoot}${apiPath}`, {
+      headers: {
+        ...baseHeaders,
+        Accept: "application/vnd.github.raw+json",
+      },
+    });
+    if (!response.ok) {
+      throw new Error(
+        `GitHub API GET ${apiPath} 返回 HTTP ${response.status}：${await response.text()}`,
+      );
+    }
+    return Buffer.from(await response.arrayBuffer());
+  }
+
+  async function graphql(query, variables) {
+    const payload = await request("/graphql", {
+      method: "POST",
+      body: { query, variables },
+    });
+    if (payload.errors?.length) {
+      throw new Error(
+        `GitHub GraphQL 返回错误：${payload.errors
+          .map((error) => error.message)
+          .join("；")}`,
+      );
+    }
+    return payload.data;
+  }
+
+  return { graphql, request, requestRaw };
+}
+
+export async function readRepositoryState(api) {
+  const reference = await api.request(
+    `/repos/${OWNER}/${REPO}/git/ref/heads/${DEFAULT_BRANCH}`,
   );
-  run("git", ["fetch", "--quiet", "origin", "main"]);
-  const head = run("git", ["rev-parse", "HEAD"]).trim();
-  const remoteHead = run("git", ["rev-parse", "refs/remotes/origin/main"]).trim();
-  if (head !== remoteHead) {
-    throw new Error("本地 main 与 origin/main 不同步；请先完成同步。");
-  }
+  const commitSha = reference.object.sha;
+  const commit = await api.request(
+    `/repos/${OWNER}/${REPO}/git/commits/${commitSha}`,
+  );
+  const treeSha = commit.tree.sha;
+  const recursive = await api.request(
+    `/repos/${OWNER}/${REPO}/git/trees/${treeSha}?recursive=1`,
+  );
+  const entries = recursive.truncated
+    ? await walkTree(api, treeSha)
+    : recursive.tree;
+  return {
+    commitSha,
+    treeSha,
+    entries,
+    byPath: new Map(entries.map((entry) => [entry.path, entry])),
+  };
 }
 
-/**
- * 检查 Ref 输入树，并生成不会发生顶层名称覆盖的复制清单。
- *
- * @param {string[]} refs Ref 文件或目录的绝对路径。
- * @returns {Promise<Array<{source: string, name: string, isDirectory: boolean}>>}
- * @throws {Error} 输入类型非法、含危险内容或顶层名称冲突时抛出。
- */
-async function inspectRefs(refs) {
-  const names = new Set();
-  const inputs = [];
-  for (const source of refs) {
-    const sourceStat = await lstat(source);
-    await inspectInputTree(source, "--ref");
-    if (!sourceStat.isFile() && !sourceStat.isDirectory()) {
-      throw new Error(`--ref 必须是文件或目录：${source}`);
-    }
-    const name = path.basename(source);
-    if (names.has(name)) {
-      throw new Error(`Ref 顶层名称冲突：${name}`);
-    }
-    names.add(name);
-    inputs.push({ source, name, isDirectory: sourceStat.isDirectory() });
-  }
-  return inputs;
-}
-
-/**
- * 验证暂存区恰好包含登记文件及本次页面/Ref 的全部文件。
- *
- * @param {string} slug 页面稳定标识。
- * @param {string} pageDirectory 页面目录。
- * @param {string} refDirectory Ref 目录。
- * @param {boolean} hasRefs 是否预期存在 Ref。
- * @returns {Promise<void>}
- * @throws {Error} 暂存文件缺失或超出白名单时抛出。
- */
-async function verifyStagedFiles(
-  slug,
-  pageDirectory,
-  refDirectory,
-  hasRefs,
-) {
-  // 已存储的文件
-  const staged = run("git", [
-    "diff",
-    "--cached",
-    "--name-only",
-    "--diff-filter=ACMR",
-  ])
-    .trim()
-    .split("\n")
-    .filter(Boolean);
-  if (!staged.includes("pages.json")) {
-    throw new Error("暂存区缺少 pages.json。");
-  }
-  if (!staged.includes(`src/pages/${slug}/index.html`)) {
-    throw new Error("暂存区缺少页面 index.html。");
-  }
-  //预期存储的文件
-  const expected = new Set([
-    "pages.json",
-    ...(await listFiles(pageDirectory)).map(
-      (file) => `src/pages/${slug}/${file}`,
+export async function verifyRepositoryPrerequisites(api) {
+  const [repository, branch, rules, workflows] = await Promise.all([
+    api.request(`/repos/${OWNER}/${REPO}`),
+    api.request(`/repos/${OWNER}/${REPO}/branches/${DEFAULT_BRANCH}`),
+    api.request(
+      `/repos/${OWNER}/${REPO}/rules/branches/${DEFAULT_BRANCH}?per_page=100`,
     ),
-    ...(hasRefs
-      ? (await listFiles(refDirectory)).map(
-          (file) => `references/${slug}/${file}`,
-        )
-      : []),
+    api.request(`/repos/${OWNER}/${REPO}/actions/workflows?per_page=100`),
   ]);
+  const pullRequestRule = rules.find((rule) => rule.type === "pull_request");
+  const statusRule = rules.find(
+    (rule) => rule.type === "required_status_checks",
+  );
+  const requiredContexts =
+    statusRule?.parameters?.required_status_checks?.map(
+      (check) => check.context,
+    ) ?? [];
+  const requiredCheck = statusRule?.parameters?.required_status_checks?.find(
+    (check) => check.context === REQUIRED_CHECK,
+  );
+  const workflow = workflows.workflows?.find(
+    (item) => item.path === REQUIRED_WORKFLOW_PATH,
+  );
+  const failures = [];
+  if (!branch.protected) failures.push("main 尚未受保护");
+  if (!pullRequestRule) failures.push("main 未要求通过 PR 合并");
+  if (!requiredContexts.includes(REQUIRED_CHECK)) {
+    failures.push(`main 未把 ${REQUIRED_CHECK} 设为必需检查`);
+  }
+  if (
+    requiredCheck &&
+    requiredCheck.integration_id !== GITHUB_ACTIONS_INTEGRATION_ID
+  ) {
+    failures.push(`${REQUIRED_CHECK} 的来源不是 GitHub Actions`);
+  }
+  if (!workflow) {
+    failures.push(`仓库缺少 ${REQUIRED_WORKFLOW_PATH}`);
+  } else if (workflow.state !== "active") {
+    failures.push(`${REQUIRED_WORKFLOW_PATH} 未启用`);
+  }
+  if (
+    pullRequestRule &&
+    !pullRequestRule.parameters?.allowed_merge_methods?.includes("squash")
+  ) {
+    failures.push("main 的 PR 规则未允许 squash merge");
+  }
+  if (repository.allow_auto_merge !== true) {
+    failures.push("仓库未启用 auto-merge");
+  }
+  if (repository.allow_squash_merge !== true) {
+    failures.push("仓库未启用 squash merge");
+  }
+  if (repository.delete_branch_on_merge !== true) {
+    failures.push("仓库未启用合并后删除 head branch");
+  }
+  if (failures.length) {
+    throw new Error(`GitHub 发布前提不满足：${failures.join("；")}。`);
+  }
+}
 
-  const actual = new Set(staged);
-  const missing = [...expected].filter((file) => !actual.has(file));
-  const extra = [...actual].filter((file) => !expected.has(file));
-  if (missing.length || extra.length) {
+async function walkTree(api, rootTreeSha) {
+  const entries = [];
+  const pending = [{ prefix: "", sha: rootTreeSha }];
+  while (pending.length) {
+    const current = pending.shift();
+    const tree = await api.request(
+      `/repos/${OWNER}/${REPO}/git/trees/${current.sha}`,
+    );
+    if (tree.truncated) {
+      throw new Error(
+        `GitHub Tree ${current.sha} 的逐层读取仍被截断，已停止发布。`,
+      );
+    }
+    for (const entry of tree.tree) {
+      const fullPath = path.posix.join(current.prefix, entry.path);
+      const normalized = { ...entry, path: fullPath };
+      entries.push(normalized);
+      if (entry.type === "tree") {
+        pending.push({ prefix: fullPath, sha: entry.sha });
+      }
+    }
+  }
+  return entries;
+}
+
+export async function preparePublication(options, repository) {
+  const source = path.resolve(options.source);
+  const sourceStat = await lstat(source);
+  await inspectInputTree(source, "--source");
+  if (
+    !sourceStat.isDirectory() &&
+    !(sourceStat.isFile() && path.extname(source).toLowerCase() === ".html")
+  ) {
+    throw new Error("--source 必须是 HTML 文件或包含 index.html 的目录。");
+  }
+
+  const pagePrefix = `src/pages/${options.slug}`;
+  const refPrefix = `references/${options.slug}`;
+  const existingPageFiles = repository.entries.filter(
+    (entry) => entry.type === "blob" && entry.path.startsWith(`${pagePrefix}/`),
+  );
+  const existingRefFiles = repository.entries.filter(
+    (entry) => entry.type === "blob" && entry.path.startsWith(`${refPrefix}/`),
+  );
+  const metadataEntry = repository.byPath.get(`${pagePrefix}/page.json`);
+  const indexEntry = repository.byPath.get(`${pagePrefix}/index.html`);
+  const isUpdate = Boolean(existingPageFiles.length);
+
+  if (isUpdate && (!metadataEntry || !indexEntry)) {
     throw new Error(
-      [
-        missing.length ? `未暂存：${missing.join(", ")}` : "",
-        extra.length ? `白名单外：${extra.join(", ")}` : "",
-      ]
-        .filter(Boolean)
-        .join("；"),
+      `${options.slug} 的远端页面结构不完整，缺少 index.html 或 page.json。`,
     );
   }
+  if (!isUpdate && existingRefFiles.length) {
+    throw new Error(`${options.slug} 尚无页面，但远端已存在同名 Ref 目录。`);
+  }
+
+  const pageFiles = sourceStat.isDirectory()
+    ? await collectFiles(source, pagePrefix)
+    : new Map([[`${pagePrefix}/index.html`, source]]);
+  if (!pageFiles.has(`${pagePrefix}/index.html`)) {
+    throw new Error("--source 目录必须包含 index.html。");
+  }
+
+  const refFiles = await collectRefInputs(
+    options.ref.map((item) => path.resolve(item)),
+    refPrefix,
+  );
+  const previousMetadata = isUpdate
+    ? JSON.parse(
+        (
+          await options.api.requestRaw(
+            `/repos/${OWNER}/${REPO}/git/blobs/${metadataEntry.sha}`,
+          )
+        ).toString("utf8"),
+      )
+    : undefined;
+  const metadata = {
+    slug: options.slug,
+    title: options.title,
+    description:
+      options.description ??
+      previousMetadata?.description ??
+      options.title,
+    publishedAt:
+      options.date ??
+      previousMetadata?.publishedAt ??
+      new Date().toISOString().slice(0, 10),
+    tags:
+      options.tags === undefined
+        ? previousMetadata?.tags ?? []
+        : options.tags
+            .split(",")
+            .map((tag) => tag.trim())
+            .filter(Boolean),
+  };
+  const metadataBuffer = Buffer.from(
+    `${JSON.stringify(metadata, null, 2)}\n`,
+    "utf8",
+  );
+  assertNoSensitiveContent(metadataBuffer, `${pagePrefix}/page.json`);
+
+  const finalRefPaths =
+    options.clearRef || options.ref.length
+      ? [...refFiles.keys()]
+      : existingRefFiles.map((entry) => entry.path);
+  await validatePreparedPage({
+    slug: options.slug,
+    pageFiles,
+    metadataBuffer,
+    refFiles,
+    finalRefPaths,
+  });
+
+  const uploads = new Map(pageFiles);
+  uploads.set(`${pagePrefix}/page.json`, metadataBuffer);
+  if (options.ref.length) {
+    for (const [repoPath, localPath] of refFiles) {
+      uploads.set(repoPath, localPath);
+    }
+  }
+
+  const deletions = new Set(
+    existingPageFiles
+      .map((entry) => entry.path)
+      .filter((repoPath) => !uploads.has(repoPath)),
+  );
+  if (options.clearRef || options.ref.length) {
+    for (const entry of existingRefFiles) {
+      if (!uploads.has(entry.path)) deletions.add(entry.path);
+    }
+  }
+
+  return {
+    deletions,
+    existingRefFiles,
+    isUpdate,
+    metadata,
+    pagePrefix,
+    refPrefix,
+    uploads,
+  };
 }
 
-/**
- * 递归列出目录中的普通文件，并返回 POSIX 风格相对路径。
- *
- * @param {string} directory 根目录。
- * @param {string} [prefix=""] 当前递归前缀。
- * @returns {Promise<string[]>}
- */
-async function listFiles(directory, prefix = "") {
-  const files = [];
-  for (const entry of await readdir(path.join(directory, prefix), {
+async function validatePreparedPage({
+  slug,
+  pageFiles,
+  metadataBuffer,
+  refFiles,
+  finalRefPaths,
+}) {
+  const temporaryRoot = await mkdtemp(
+    path.join(os.tmpdir(), "static-page-publish-"),
+  );
+  try {
+    for (const [repoPath, localPath] of pageFiles) {
+      const destination = path.join(temporaryRoot, repoPath);
+      await mkdir(path.dirname(destination), { recursive: true });
+      await cp(localPath, destination);
+    }
+    const metadataPath = path.join(
+      temporaryRoot,
+      "src",
+      "pages",
+      slug,
+      "page.json",
+    );
+    await mkdir(path.dirname(metadataPath), { recursive: true });
+    await writeFile(metadataPath, metadataBuffer);
+
+    for (const repoPath of finalRefPaths) {
+      const destination = path.join(temporaryRoot, repoPath);
+      await mkdir(path.dirname(destination), { recursive: true });
+      const localPath = refFiles.get(repoPath);
+      if (localPath) {
+        await cp(localPath, destination);
+      } else {
+        await writeFile(destination, "");
+      }
+    }
+    await loadAndValidatePages(temporaryRoot);
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
+export async function publishPrepared({
+  api,
+  options,
+  prepared,
+  repository,
+}) {
+  const treeChanges = [];
+  for (const [repoPath, value] of prepared.uploads) {
+    const buffer = Buffer.isBuffer(value) ? value : await readFile(value);
+    validateFileSize(buffer.length, repoPath);
+    assertNoSensitiveContent(buffer, repoPath);
+    const current = repository.byPath.get(repoPath);
+    if (current?.sha === gitBlobSha(buffer)) continue;
+    const encoded = selectBlobEncoding(buffer);
+    const blob = await api.request(`/repos/${OWNER}/${REPO}/git/blobs`, {
+      method: "POST",
+      body: encoded,
+    });
+    treeChanges.push({
+      path: repoPath,
+      mode: "100644",
+      type: "blob",
+      sha: blob.sha,
+    });
+  }
+  for (const repoPath of prepared.deletions) {
+    treeChanges.push({
+      path: repoPath,
+      mode: "100644",
+      type: "blob",
+      sha: null,
+    });
+  }
+  if (!treeChanges.length) {
+    throw new Error("输入内容与远端完全一致，没有可发布变化。");
+  }
+
+  const tree = await api.request(`/repos/${OWNER}/${REPO}/git/trees`, {
+    method: "POST",
+    body: { base_tree: repository.treeSha, tree: treeChanges },
+  });
+  const commit = await api.request(`/repos/${OWNER}/${REPO}/git/commits`, {
+    method: "POST",
+    body: {
+      message: `${prepared.isUpdate ? "Update" : "Publish"} ${options.slug}`,
+      tree: tree.sha,
+      parents: [repository.commitSha],
+    },
+  });
+  const branch = createBranchName(options.slug);
+  try {
+    await api.request(`/repos/${OWNER}/${REPO}/git/refs`, {
+      method: "POST",
+      body: { ref: `refs/heads/${branch}`, sha: commit.sha },
+    });
+  } catch (createError) {
+    const cleanupError = await deletePublicationBranch(api, branch);
+    if (cleanupError) {
+      throw rollbackError(
+        "创建发布分支失败，且无法确认远端是否已回滚",
+        branch,
+        createError,
+        cleanupError,
+      );
+    }
+    throw createError;
+  }
+
+  let pullRequest;
+  try {
+    pullRequest = await api.request(`/repos/${OWNER}/${REPO}/pulls`, {
+      method: "POST",
+      body: {
+        title: `${prepared.isUpdate ? "Update" : "Publish"} ${options.slug}`,
+        head: branch,
+        base: DEFAULT_BRANCH,
+        body:
+          `自动发布页面 \`${options.slug}\`。\n\n` +
+          "- 页面资源与 metadata 位于独立 slug 目录\n" +
+          "- pages.json 将在 CI/Vercel 构建时聚合生成",
+      },
+    });
+  } catch (error) {
+    const cleanupError = await deletePublicationBranch(api, branch);
+    if (cleanupError) {
+      throw rollbackError(
+        "PR 创建失败，且发布分支回滚失败",
+        branch,
+        error,
+        cleanupError,
+      );
+    }
+    throw error;
+  }
+
+  try {
+    await api.graphql(
+      `mutation EnableAutoMerge($pullRequestId: ID!) {
+        enablePullRequestAutoMerge(input: {
+          pullRequestId: $pullRequestId,
+          mergeMethod: SQUASH
+        }) {
+          pullRequest { number }
+        }
+      }`,
+      { pullRequestId: pullRequest.node_id },
+    );
+  } catch (error) {
+    throw new Error(
+      `PR 已创建，但无法启用自动合并：${pullRequest.html_url}；${error.message}`,
+    );
+  }
+
+  return {
+    branch,
+    commitSha: commit.sha,
+    pullRequestNumber: pullRequest.number,
+    pullRequestUrl: pullRequest.html_url,
+  };
+}
+
+async function main() {
+  const options = parseArgs(process.argv.slice(2));
+  validateOptions(options);
+  const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
+  if (options.pr && !token) {
+    throw new Error("--pr 需要通过 GH_TOKEN 或 GITHUB_TOKEN 提供 GitHub 令牌。");
+  }
+
+  const api = createGitHubClient({ token });
+  if (options.pr) {
+    await verifyRepositoryPrerequisites(api);
+  }
+  const repository = await readRepositoryState(api);
+  const prepared = await preparePublication({ ...options, api }, repository);
+  const refCount =
+    options.clearRef || options.ref.length
+      ? [...prepared.uploads.keys()].filter((repoPath) =>
+          repoPath.startsWith(`${prepared.refPrefix}/`),
+        ).length
+      : prepared.existingRefFiles.length;
+
+  if (options.dryRun) {
+    console.log(
+      `Dry run 通过：${prepared.isUpdate ? "更新" : "新增"} /${options.slug}/，` +
+        `${refCount} 个 Ref 文件；未创建 Blob、分支或 PR。`,
+    );
+    return;
+  }
+
+  const result = await publishPrepared({
+    api,
+    options,
+    prepared,
+    repository,
+  });
+  console.log(`PR 已创建并启用自动合并：${result.pullRequestUrl}`);
+  console.log(`分支：${result.branch}`);
+  console.log(`提交：${result.commitSha}`);
+  console.log(`预期正式页面：${SITE}/${options.slug}/`);
+  console.log(`Ref 文件：${refCount}`);
+}
+
+async function collectFiles(directory, repoPrefix, relative = "") {
+  const files = new Map();
+  const entries = await readdir(path.join(directory, relative), {
     withFileTypes: true,
-  })) {
-    const relative = path.posix.join(prefix, entry.name);
+  });
+  for (const entry of entries) {
+    const childRelative = path.posix.join(relative, entry.name);
+    const localPath = path.join(directory, childRelative);
+    const repoPath = path.posix.join(repoPrefix, childRelative);
     if (entry.isDirectory()) {
-      files.push(...(await listFiles(directory, relative)));
+      for (const item of await collectFiles(
+        directory,
+        repoPrefix,
+        childRelative,
+      )) {
+        files.set(...item);
+      }
     } else if (entry.isFile()) {
-      files.push(relative);
+      files.set(repoPath, localPath);
+    } else {
+      throw new Error(`输入只允许普通文件和目录：${localPath}`);
     }
   }
   return files;
 }
 
-/**
- * 递归检查输入树，只允许普通文件/目录，并拒绝符号链接和敏感文件。
- *
- * @param {string} target 待检查路径。
- * @param {string} label 用于错误定位的 CLI 参数名。
- * @returns {Promise<void>}
- */
+async function collectRefInputs(refs, refPrefix) {
+  const topLevelNames = new Set();
+  const files = new Map();
+  for (const source of refs) {
+    await inspectInputTree(source, "--ref");
+    const sourceStat = await lstat(source);
+    const name = path.basename(source);
+    if (topLevelNames.has(name)) {
+      throw new Error(`Ref 顶层名称冲突：${name}`);
+    }
+    topLevelNames.add(name);
+    if (sourceStat.isDirectory()) {
+      for (const item of await collectFiles(
+        source,
+        path.posix.join(refPrefix, name),
+      )) {
+        files.set(...item);
+      }
+    } else {
+      files.set(path.posix.join(refPrefix, name), source);
+    }
+  }
+  return files;
+}
+
 async function inspectInputTree(target, label) {
   const targetStat = await lstat(target);
   if (targetStat.isSymbolicLink()) {
@@ -395,6 +737,7 @@ async function inspectInputTree(target, label) {
     throw new Error(`${label} 只允许普通文件和目录：${target}`);
   }
   if (targetStat.isFile()) {
+    validateFileSize(targetStat.size, target);
     await inspectSensitiveFile(target, label);
     return;
   }
@@ -403,13 +746,6 @@ async function inspectInputTree(target, label) {
   }
 }
 
-/**
- * 以文件名规则和文件头采样识别常见凭据、Cookie 与私钥。
- *
- * @param {string} file 待检查文件。
- * @param {string} label 用于错误定位的 CLI 参数名。
- * @returns {Promise<void>}
- */
 async function inspectSensitiveFile(file, label) {
   const name = path.basename(file).toLowerCase();
   if (
@@ -425,129 +761,53 @@ async function inspectSensitiveFile(file, label) {
     throw new Error(`${label} 包含危险文件名：${file}`);
   }
 
-  const handle = await open(file, "r");
+  assertNoSensitiveContent(await readFile(file), `${label} 文件 ${file}`);
+}
+
+function createBranchName(slug) {
+  const timestamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
+  return `publish/${slug}-${timestamp}-${randomBytes(3).toString("hex")}`;
+}
+
+function encodeRef(value) {
+  return value.split("/").map(encodeURIComponent).join("/");
+}
+
+async function deletePublicationBranch(api, branch) {
   try {
-    const buffer = Buffer.alloc(64 * 1024);
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    const sample = buffer.subarray(0, bytesRead).toString("utf8");
-    if (
-      /-----BEGIN (?:RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----/.test(sample)
-    ) {
-      throw new Error(`${label} 包含私钥标记：${file}`);
-    }
-  } finally {
-    await handle.close();
-  }
-}
-
-/**
- * 统计目录内普通文件；目录不存在视为零个 Ref。
- *
- * @param {string} directory 待统计目录。
- * @returns {Promise<number>}
- */
-async function countFiles(directory) {
-  try {
-    return (await listFiles(directory)).length;
-  } catch (error) {
-    if (error.code === "ENOENT") return 0;
-    throw error;
-  }
-}
-
-/**
- * 在提交前失败或演练结束时，撤销本脚本暂存与落盘的所有变更。
- * 恢复 pages.json 后重新构建，避免 dist 遗留演练产物。
- *
- * @returns {Promise<void>}
- */
-async function cleanup() {
-  let registryRestored = false;
-  if (stagedByScript) {
-    run("git", [
-      "restore",
-      "--staged",
-      "--",
-      "pages.json",
-      `src/pages/${options.slug ?? "__invalid__"}`,
-      `references/${options.slug ?? "__invalid__"}`,
-    ], false, true);
-    stagedByScript = false;
-  }
-  if (originalRegistry !== undefined) {
-    await writeFile(path.join(repoRoot, "pages.json"), originalRegistry, "utf8");
-    originalRegistry = undefined;
-    registryRestored = true;
-  }
-  while (createdPaths.length) {
-    await rm(createdPaths.pop(), { recursive: true, force: true });
-  }
-  if (registryRestored) {
-    run("npm", ["run", "build"], true, true);
-  }
-}
-
-/**
- * 要求发布目标尚不存在，确保新增流程不会覆盖历史内容。
- *
- * @param {string} target 预期不存在的路径。
- * @returns {Promise<void>}
- */
-async function requireMissing(target) {
-  try {
-    await stat(target);
-    throw new Error(`目标路径已存在：${target}`);
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
-}
-
-/**
- * 断言仓库配置值与发布要求完全一致。
- *
- * @param {string} actual 实际值。
- * @param {string} expected 期望值。
- * @param {string} label 配置项名称。
- */
-function requireEqual(actual, expected, label) {
-  if (actual !== expected) {
-    throw new Error(`${label} 必须为 ${expected}，实际为 ${actual || "未设置"}。`);
-  }
-}
-
-/**
- * 在仓库根目录同步执行命令，并统一处理输出继承与失败策略。
- *
- * @param {string} command 可执行命令。
- * @param {string[]} args 命令参数。
- * @param {boolean} [inherit=false] 是否把子进程输出直接交给当前终端。
- * @param {boolean} [allowFailure=false] 是否容忍非零退出码。
- * @returns {string} 捕获到的标准输出；继承输出时通常为空。
- */
-function run(command, args, inherit = false, allowFailure = false) {
-  const result = spawnSync(command, args, {
-    cwd: repoRoot,
-    encoding: "utf8",
-    stdio: inherit ? "inherit" : "pipe",
-  });
-  if (result.status !== 0 && !allowFailure) {
-    throw new Error(
-      `${command} ${args.join(" ")} 执行失败：${result.stderr?.trim() ?? ""}`,
+    await api.request(
+      `/repos/${OWNER}/${REPO}/git/refs/heads/${encodeRef(branch)}`,
+      { method: "DELETE" },
     );
+    return undefined;
+  } catch (error) {
+    if (error.status === 404) return undefined;
+    return error;
   }
-  return result.stdout ?? "";
 }
 
-/**
- * 以统一用法说明终止 CLI 参数处理。
- *
- * @param {string} message 具体参数错误。
- * @throws {Error} 始终抛出。
- */
+function rollbackError(message, branch, primaryError, cleanupError) {
+  return new AggregateError(
+    [primaryError, cleanupError],
+    `${message}：${branch}。原始错误：${primaryError.message}；` +
+      `清理错误：${cleanupError.message}。请在 GitHub 检查并删除该分支。`,
+  );
+}
+
 function usage(message) {
   throw new Error(
     `${message}\n用法：npm run publish:page -- --source <HTML或目录> --slug <slug> --title <标题> ` +
       "[--description <简介>] [--tags <标签1,标签2>] [--date <YYYY-MM-DD>] " +
-      "[--ref <文件或目录> ...] (--dry-run|--push)",
+      "[--ref <文件或目录> ...] [--clear-ref] (--dry-run|--pr)",
   );
+}
+
+const isMain =
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  });
 }
