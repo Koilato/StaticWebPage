@@ -1,62 +1,44 @@
-// 从 Node.js 内置的 Promise 版文件系统模块中导入复制、建目录、删除和写文件函数。
 import { cp, mkdir, rm, writeFile } from "node:fs/promises";
-// 导入 Node.js 内置的路径处理模块；它只计算路径字符串，不直接读写文件。
 import path from "node:path";
-// 导入“文件 URL 转本机路径”函数，用于处理 import.meta.url。
 import { fileURLToPath } from "node:url";
-import { generatePages } from "./generate-pages.mjs";
-// 从项目自定义模块导入 HTML 转义函数。
-import { escapeHtml } from "./site-utils.mjs";
+import { escapeHtml, loadAndValidatePages } from "./site-utils.mjs";
 
-// import.meta.url 是当前脚本的 file: URL；转为本机路径并取父目录，得到仓库根目录。
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-// 所有构建产物统一写入仓库根目录下的 dist。
 const distDir = path.join(rootDir, "dist");
-// 允许部署环境覆盖站点域名，并去掉末尾斜杠，避免拼接 URL 时产生双斜杠。
 const siteUrl = (process.env.SITE_URL ?? "https://static-web-page-pied.vercel.app")
   .replace(/\/+$/, "");
-// 聚合并校验分散的 page.json，同时生成统一 pages.json。
-const pages = await generatePages(rootDir);
+const pages = await loadAndValidatePages(rootDir);
+await writeFile(
+  path.join(rootDir, "pages.json"),
+  `${JSON.stringify(pages, null, 2)}\n`,
+  "utf8",
+);
 
-// 删除旧 dist，创建空 dist。recursive 允许删除整个目录，force 使目录不存在时也不报错。
 await rm(distDir, { recursive: true, force: true });
 await mkdir(distDir, { recursive: true });
 
-// 逐个复制页面目录：源目录来自 page.file，目标目录名使用稳定的 page.slug。
 for (const page of pages) {
   const sourceDir = path.dirname(path.join(rootDir, page.file));
   await cp(sourceDir, path.join(distDir, page.slug), { recursive: true });
 }
 
-// 根据页面配置生成站点目录首页和 sitemap，并以 UTF-8 写入 dist。
 await writeFile(path.join(distDir, "index.html"), renderIndex(pages), "utf8");
 await writeFile(path.join(distDir, "sitemap.xml"), renderSitemap(pages), "utf8");
 
-// 输出构建摘要，便于本地或 CI 日志确认生成的页面数量。
 console.log(`构建完成：dist/ 包含首页、站点地图和 ${pages.length} 个页面。`);
 
-// 根据页面数组生成完整的目录首页 HTML 字符串。
-/**
- * 将已校验的页面配置渲染为站点目录首页。
- * @param {Array<object>} entries 页面配置列表。
- * @returns {string} 可直接写入文件的完整 HTML。
- */
 function renderIndex(entries) {
-  // map 把每个页面对象转换为一张 HTML 卡片；join 把所有卡片连接成一个字符串。
   const cards = entries
     .map((page) => {
-      // 合并标题、简介和标签，作为不区分字段的搜索文本。
       const searchable = [
         page.title,
         page.description,
         page.tags.join(" "),
       ].join(" ");
-      // 把每个标签转换为 <span>；escapeHtml 防止数据被解释为 HTML 代码。
       const tags = page.tags
         .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`)
         .join("");
 
-      // 返回当前页面对应的卡片 HTML；${...} 用于插入经过转义的数据。
       return `<article class="card" data-search="${escapeHtml(searchable.toLowerCase())}">
         <div class="meta"><time datetime="${escapeHtml(page.publishedAt)}">${escapeHtml(page.publishedAt)}</time></div>
         <h2><a href="/${escapeHtml(page.slug)}/">${escapeHtml(page.title)}</a></h2>
@@ -66,8 +48,6 @@ function renderIndex(entries) {
     })
     .join("\n");
 
-  // 返回完整 HTML。其中的 <style> 是页面样式，<script> 是浏览器端搜索逻辑。
-  // 搜索脚本读取预先转为小写的 data-search，并通过 hidden 属性筛选卡片。
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -129,26 +109,15 @@ function renderIndex(entries) {
 `;
 }
 
-// 根据页面数组生成 sitemap.xml 字符串，供搜索引擎发现站点页面。
-/**
- * 将已校验的页面配置渲染为站点地图。
- * @param {Array<object>} entries 页面配置列表。
- * @returns {string} 可直接写入文件的 sitemap XML。
- */
 function renderSitemap(entries) {
   const urls = [
-    // 首页 URL。
     `<url><loc>${escapeHtml(siteUrl)}/</loc></url>`,
-    // ... 把 map 生成的页面 URL 数组展开，并追加到当前数组。
     ...entries.map(
       (page) =>
         `<url><loc>${escapeHtml(siteUrl)}/${escapeHtml(page.slug)}/</loc><lastmod>${escapeHtml(page.publishedAt)}</lastmod></url>`,
     ),
-    // sitemap 的所有 <url> 节点之间不需要分隔符。
   ].join("");
 
-  // 把所有 URL 节点包在 sitemap 标准要求的 <urlset> 根节点中。
-  // URL、slug 和日期均先经 escapeHtml 处理，避免特殊字符破坏 XML 结构。
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>
 `;
