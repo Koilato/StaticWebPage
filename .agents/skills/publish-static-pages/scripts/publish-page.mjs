@@ -1,5 +1,4 @@
 import { createHash, randomBytes } from "node:crypto";
-import { spawnSync } from "node:child_process";
 import {
   cp,
   lstat,
@@ -12,6 +11,7 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadAndValidatePages } from "../../../../scripts/site-utils.mjs";
 
 const OWNER = "Koilato";
@@ -21,6 +21,7 @@ const SITE = "https://static-web-page-pied.vercel.app";
 const API_ROOT = "https://api.github.com";
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const WARNING_SIZE = 50 * 1024 * 1024;
 const MAX_SIZE = 100 * 1024 * 1024;
 const REQUIRED_CHECK = "publish-check";
 const REQUIRED_WORKFLOW_PATH = ".github/workflows/publish-check.yml";
@@ -56,7 +57,7 @@ const SENSITIVE_PATTERNS = [
   },
 ];
 
-function parseArgs(args) {
+export function parseArgs(args) {
   const result = {
     ref: [],
     clearRef: false,
@@ -111,7 +112,7 @@ function parseArgs(args) {
   return result;
 }
 
-function validateOptions(options) {
+export function validateOptions(options) {
   for (const required of ["source", "slug", "title"]) {
     if (!options[required]) usage(`缺少 --${required}。`);
   }
@@ -129,7 +130,7 @@ function validateOptions(options) {
   }
 }
 
-function selectBlobEncoding(buffer) {
+export function selectBlobEncoding(buffer) {
   if (buffer.includes(0)) {
     return { content: buffer.toString("base64"), encoding: "base64" };
   }
@@ -139,18 +140,21 @@ function selectBlobEncoding(buffer) {
       return { content: text, encoding: "utf-8" };
     }
   } catch {
-    // 使用 Base64 保留任意二进制内容。
+    // 任意非 UTF-8 字节必须使用 Base64，避免内容损坏。
   }
   return { content: buffer.toString("base64"), encoding: "base64" };
 }
 
-function validateFileSize(size, label) {
+export function validateFileSize(size, label, warn = console.warn) {
   if (size > MAX_SIZE) {
     throw new Error(`${label} 超过 100 MiB，本版不支持 Git LFS。`);
   }
+  if (size > WARNING_SIZE) {
+    warn(`${label} 超过 50 MiB，GitHub 建议改用 Git LFS。`);
+  }
 }
 
-function assertNoSensitiveContent(buffer, label) {
+export function assertNoSensitiveContent(buffer, label) {
   const content = buffer.toString("utf8");
   const match = SENSITIVE_PATTERNS.find(({ pattern }) => pattern.test(content));
   if (match) {
@@ -158,14 +162,18 @@ function assertNoSensitiveContent(buffer, label) {
   }
 }
 
-function gitBlobSha(buffer) {
+export function gitBlobSha(buffer) {
   return createHash("sha1")
     .update(`blob ${buffer.length}\0`)
     .update(buffer)
     .digest("hex");
 }
 
-function createGitHubClient(token) {
+export function createGitHubClient({
+  token,
+  fetchImpl = globalThis.fetch,
+  apiRoot = API_ROOT,
+} = {}) {
   const baseHeaders = {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
@@ -174,7 +182,7 @@ function createGitHubClient(token) {
   };
 
   async function request(apiPath, { method = "GET", body } = {}) {
-    const response = await fetch(`${API_ROOT}${apiPath}`, {
+    const response = await fetchImpl(`${apiRoot}${apiPath}`, {
       method,
       headers: {
         ...baseHeaders,
@@ -205,7 +213,7 @@ function createGitHubClient(token) {
   }
 
   async function requestRaw(apiPath) {
-    const response = await fetch(`${API_ROOT}${apiPath}`, {
+    const response = await fetchImpl(`${apiRoot}${apiPath}`, {
       headers: {
         ...baseHeaders,
         Accept: "application/vnd.github.raw+json",
@@ -237,26 +245,7 @@ function createGitHubClient(token) {
   return { graphql, request, requestRaw };
 }
 
-function resolveGitHubToken(useCredentialHelper) {
-  const environmentToken =
-    process.env.GH_TOKEN?.trim() || process.env.GITHUB_TOKEN?.trim();
-  if (environmentToken || !useCredentialHelper) return environmentToken;
-
-  const result = spawnSync("git", ["credential", "fill"], {
-    input: "protocol=https\nhost=github.com\n\n",
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-    encoding: "utf8",
-    stdio: ["pipe", "pipe", "ignore"],
-    timeout: 5_000,
-  });
-  if (result.status !== 0) return undefined;
-  const password = result.stdout
-    .split(/\r?\n/)
-    .find((line) => line.startsWith("password="));
-  return password?.slice("password=".length).trim() || undefined;
-}
-
-async function readRepositoryState(api) {
+export async function readRepositoryState(api) {
   const reference = await api.request(
     `/repos/${OWNER}/${REPO}/git/ref/heads/${DEFAULT_BRANCH}`,
   );
@@ -279,7 +268,7 @@ async function readRepositoryState(api) {
   };
 }
 
-async function verifyRepositoryPrerequisites(api) {
+export async function verifyRepositoryPrerequisites(api) {
   const [repository, branch, rules, workflows] = await Promise.all([
     api.request(`/repos/${OWNER}/${REPO}`),
     api.request(`/repos/${OWNER}/${REPO}/branches/${DEFAULT_BRANCH}`),
@@ -364,7 +353,7 @@ async function walkTree(api, rootTreeSha) {
   return entries;
 }
 
-async function preparePublication(options, repository) {
+export async function preparePublication(options, repository) {
   const source = path.resolve(options.source);
   const sourceStat = await lstat(source);
   await inspectInputTree(source, "--source");
@@ -476,6 +465,8 @@ async function preparePublication(options, repository) {
     deletions,
     existingRefFiles,
     isUpdate,
+    metadata,
+    pagePrefix,
     refPrefix,
     uploads,
   };
@@ -523,7 +514,7 @@ async function validatePreparedPage({
   }
 }
 
-async function publishPrepared({
+export async function publishPrepared({
   api,
   options,
   prepared,
@@ -639,6 +630,7 @@ async function publishPrepared({
   return {
     branch,
     commitSha: commit.sha,
+    pullRequestNumber: pullRequest.number,
     pullRequestUrl: pullRequest.html_url,
   };
 }
@@ -646,15 +638,12 @@ async function publishPrepared({
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   validateOptions(options);
-  const token = resolveGitHubToken(options.pr);
+  const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
   if (options.pr && !token) {
-    throw new Error(
-      "--pr 未找到可用的 GitHub 凭据：请设置 GH_TOKEN/GITHUB_TOKEN，" +
-        "或先确保本机 Git 可通过 HTTPS credential helper 访问 github.com。",
-    );
+    throw new Error("--pr 需要通过 GH_TOKEN 或 GITHUB_TOKEN 提供 GitHub 令牌。");
   }
 
-  const api = createGitHubClient(token);
+  const api = createGitHubClient({ token });
   if (options.pr) {
     await verifyRepositoryPrerequisites(api);
   }
@@ -813,7 +802,12 @@ function usage(message) {
   );
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-});
+const isMain =
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  });
+}

@@ -1,26 +1,74 @@
+
 # 编辑静态界面
 
-产出可入库、可独立静态运行的最终页面。保留用户的信息层级、视觉语言和交互意图，只做任务所需改动；HTML、CSS、JavaScript、字体和图片必须随页面提供或使用可靠远端地址。
+## 职责
 
-## Ref
+本文件只规定如何得到可入库的最终 HTML 与页面运行资源。不规定仓库目录、`pages.json`、Git 操作或部署流程。
 
-页面应有唯一且闭合的 `<main>`，以及位于 `</main>` 前、作为最后一个 section 的唯一 `section#ref`。若正文边界不明确，不得机械包装，应先询问用户。
+## 保持页面完整
 
-Ref 文件使用逐段 URL 编码的正式地址：
+- 保留用户原有的信息层级、视觉语言和交互意图；只做任务所需改动。
+- HTML、CSS、JavaScript、字体和显示所需图片必须可在静态环境运行。
+- 检查所有相对 `src`、`href` 和脚本资源；不得留下缺失文件、本机绝对路径或仅在原工具中有效的临时地址。
+- 改动后检查桌面和窄屏布局、键盘操作、可读对比度以及浏览器控制台错误。
 
-```text
-https://raw.githubusercontent.com/Koilato/StaticWebPage/main/references/<slug>/<文件路径>
-```
+## 写入 Ref
 
-有附件时，每个文件使用独立 `li`，包含非空名称、用途说明和链接：
+先根据实际附件清单生成完整 Ref，确保最终恰好一个 `section#ref`。
+
+根据 `<main>` 结构选择处理方式：
+
+1. **恰好一个有效 `<main>`**：把 Ref 放在 `</main>` 之前，并确保它是 `<main>` 中最后一个 `section`。
+2. **没有 `<main>`**：为页面正文补建唯一 `<main>`，保留页眉、导航、页脚和全局脚本在合适的外部位置；再把 Ref 放在其末尾。
+3. **多个 `<main>`、标签不闭合或正文边界不明确**：只有在语义边界明确时才整理为一个 `<main>`；否则停止并询问用户，不得猜测或把整页机械包裹。
+
+Ref 链接使用最终 GitHub Raw 地址。即使没有附件，也必须保留无附件版本的 Ref。
+
+## Ref 文件链接
+
+Ref 文件使用最终 main 分支的 GitHub Raw 地址，并对每个路径段分别进行 URL 编码：
+
+`https://raw.githubusercontent.com/Koilato/StaticWebPage/main/references/<slug>/<文件名>`
+
+## Ref HTML
+
+有附件时，每个附件使用一个独立 `li`：
 
 ```html
 <section id="ref">
   <h2>Ref</h2>
-  <ul><li><a href="<Raw URL>" target="_blank" rel="noopener noreferrer">文件名</a><p>用途</p></li></ul>
+  <p>以下文件由 GitHub 直接提供，下载不经过 Vercel。</p>
+  <ul>
+    <li>
+      <a
+        href="<该附件的最终 GitHub Raw URL>"
+        target="_blank"
+        rel="noopener noreferrer"
+      >文件显示名称</a>
+      <p>说明文件内容和用途。</p>
+    </li>
+  </ul>
 </section>
 ```
 
-没有附件时仍保留 Ref，并写明“暂无关联文件”。样式可以沿用页面设计，但附件目录中的每个文件必须恰好出现一次。
+没有附件时使用：
 
-完成后检查相对资源、桌面与窄屏布局、键盘操作、控制台错误和核心交互；不得留下缺失资源、本机绝对路径、临时地址或敏感信息。
+```html
+<section id="ref">
+  <h2>Ref</h2>
+  <p>暂无关联文件。</p>
+</section>
+```
+
+允许添加与页面一致的 `class`，但不得改变元素的语义关系。附件目录中的每个文件必须在 Ref 中恰好出现一次；链接目标必须属于当前 slug，显示名称和用途说明均不得为空。
+
+
+## 输出检查
+
+输出应满足：
+
+- 存在唯一且闭合的 `<main>`；
+- 页面中必须存在唯一的 <section id="ref">，并且它是 <main> 内最后一个 <section>
+- 每个附件在 Ref 中恰有一个非空名称和非空用途说明；
+- 没有附件时显示明确的无附件说明；
+- 页面所需本地资源齐全，且未泄露敏感信息。

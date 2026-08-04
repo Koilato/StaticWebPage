@@ -5,7 +5,12 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "check": "npm run build",
+    "check:generated": "node scripts/check-generated-files.mjs",
+    "generate:pages": "node scripts/generate-pages.mjs",
+    "validate": "node scripts/validate.mjs",
+    "test": "node --test scripts/site-utils.test.mjs scripts/check-generated-files.test.mjs .agents/skills/publish-static-pages/scripts/publish-page.test.mjs",
+    "check": "npm run check:generated && npm run test && npm run validate && npm run build",
+    "publish:check": "node .agents/skills/publish-static-pages/scripts/preflight.mjs",
     "publish:page": "node .agents/skills/publish-static-pages/scripts/publish-page.mjs"
   },
   "engines": {
